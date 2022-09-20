@@ -1,0 +1,1 @@
+This program implements textual chat via proxy server (aka a server through which all messages go).
