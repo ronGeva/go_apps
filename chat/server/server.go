@@ -47,16 +47,4 @@ func main() {
 		clients = append(clients, client)
 		go serveClient(client, broadcast_chan)
 	}
-
-	// data := make([]byte, 200) // create a 200 bytes empty buffer
-	// _, err = client.Read(data)
-	// if err != nil {
-	// 	fmt.Println("Failed to read data from client")
-	// 	return
-	// }
-	// msg := chat_framework.HelloMessage{}
-	// copy(msg.Header[:], data[:4])
-	// msg.Greeting = string(data[4:])
-
-	// fmt.Println("User msg: ", msg)
 }
