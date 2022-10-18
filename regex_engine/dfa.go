@@ -2,41 +2,47 @@
 package regex_engine
 
 type AutomataNode struct {
-	next            map[byte]*AutomataNode
+	next            map[byte]int
 	is_accept_state bool
 }
 
 func newAutomataNode() *AutomataNode {
 	node := AutomataNode{}
-	node.next = make(map[byte]*AutomataNode)
+	node.next = make(map[byte]int)
 	node.is_accept_state = false
 	return &node
 }
 
 type CompiledPattern struct {
-	start *AutomataNode
+	nodes []*AutomataNode
 }
 
-func CompilePattern(pattern string) CompiledPattern {
-	compiled_pattern := CompiledPattern{newAutomataNode()}
-	current_node := compiled_pattern.start
+func newCompiledPattern() *CompiledPattern {
+	nodes := make([]*AutomataNode, 1)
+	nodes[0] = newAutomataNode()
+	return &CompiledPattern{nodes: nodes}
+}
 
-	for i := 0; i < len(pattern); i++ {
-		tmp := newAutomataNode()
-		current_node.next[pattern[i]] = tmp
-		current_node = tmp
-	}
-	current_node.is_accept_state = true // mark the final state as an accepting state
-
-	return compiled_pattern
+/*
+Currently supports:
+{<plain characters>, '.', '+'}
+*/
+func CompilePattern(pattern string) *CompiledPattern {
+	ndfa := CreateNDFA(pattern)
+	return ndfa.convertToDeterministic()
 }
 
 func (pattern *CompiledPattern) Match(data string) bool {
-	currentNode := pattern.start
+	currentNode := pattern.nodes[0]
 	for i := 0; i < len(data); i++ {
-		currentNode = currentNode.next[data[i]]
-		if currentNode == nil {
-			return false
+		if nextNodeIndex, exists := currentNode.next[data[i]]; exists {
+			currentNode = pattern.nodes[nextNodeIndex]
+		} else {
+			if nextNodeIndex, exists := currentNode.next['.']; exists {
+				currentNode = pattern.nodes[nextNodeIndex]
+			} else {
+				return false
+			}
 		}
 	}
 	return currentNode.is_accept_state
