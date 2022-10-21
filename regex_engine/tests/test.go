@@ -34,13 +34,26 @@ func testJoker() {
 	fmt.Println("false=", res.Match("Hello woldabba"))
 }
 
+func testWildcard() {
+	res := regex_engine.CompilePattern("Hell.*d")
+	fmt.Println("true=", res.Match("Hellod"))
+	fmt.Println("true=", res.Match("Helld"))
+	fmt.Println("false=", res.Match("Hellooooooooooo"))
+	res = regex_engine.CompilePattern(".*")
+	fmt.Println("true=", res.Match(""))
+	fmt.Println("true=", res.Match("alsdkalksdk"))
+	res = regex_engine.CompilePattern("Hellod*")
+	fmt.Println("true=", res.Match("Hello"))
+	fmt.Println("true=", res.Match("Hellod"))
+	fmt.Println("true=", res.Match("Helloddddd"))
+	fmt.Println("false=", res.Match("Hellodddddde"))
+}
+
 func testSimple() {
 	res := regex_engine.CompilePattern("Hello world")
 	fmt.Println(res.Match("Hello worldd"))
 }
 
 func main() {
-	regex := regex_engine.CompilePattern("Hey shai.+krasin")
-	fmt.Println(regex.Match("Hey shai the bo$$ krasin"))
-	fmt.Println(regex.Match("Hey shai not the bo$$ krasin with faulty string"))
+	testWildcard()
 }

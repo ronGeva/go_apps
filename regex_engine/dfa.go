@@ -25,7 +25,7 @@ func newCompiledPattern() *CompiledPattern {
 
 /*
 Currently supports:
-{<plain characters>, '.', '+'}
+{<plain characters>, '.', '+', '*'}
 */
 func CompilePattern(pattern string) *CompiledPattern {
 	ndfa := CreateNDFA(pattern)
