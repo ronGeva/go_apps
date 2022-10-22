@@ -124,11 +124,6 @@ func getAcceptState(node_id []int, ndfa *NondeterministicAutomata) bool {
 		if ndfa.nodes[index].is_accept_state {
 			return true
 		}
-		for _, epsilon_shift := range ndfa.epsilon_shifts {
-			if (epsilon_shift.src_node == index) && (ndfa.nodes[epsilon_shift.dst_node].is_accept_state) {
-				return true
-			}
-		}
 	}
 	return false
 }
@@ -151,6 +146,7 @@ func joinSlices(first []int, second []int) []int {
 
 /*
 For each epsilon shift {a, b} add the outgoing edges of b to a.
+Also, if b is in accept state, then a is as well (since we can get to b from a with 0 new characters).
 */
 func resolveEpsilonShifts(epsilon_shifts []EpsilonShift, nodes []*NondeterministicNode) {
 	// reversed order
@@ -164,6 +160,9 @@ func resolveEpsilonShifts(epsilon_shifts []EpsilonShift, nodes []*Nondeterminist
 			} else {
 				src_node.next[key] = joinSlices(src_destination_nodes, destination_nodes)
 			}
+		}
+		if nodes[curr_shift.dst_node].is_accept_state {
+			nodes[curr_shift.src_node].is_accept_state = true
 		}
 	}
 }

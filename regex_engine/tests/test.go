@@ -47,6 +47,9 @@ func testWildcard() {
 	fmt.Println("true=", res.Match("Hellod"))
 	fmt.Println("true=", res.Match("Helloddddd"))
 	fmt.Println("false=", res.Match("Hellodddddde"))
+	res = regex_engine.CompilePattern("Arr*Bro.*")
+	fmt.Println("true=", res.Match("ArBrolllla"))
+	fmt.Println("false=", res.Match("Arrrwoah"))
 }
 
 func testSimple() {
