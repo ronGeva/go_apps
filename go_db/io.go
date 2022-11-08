@@ -42,15 +42,15 @@ Structure of tables array:
 <tables array> - <db pointer size> * <size>, each entry is a db pointer
 
 Structure of table:
-<MAGIC> - 4 bytes
 <size of unique ID> - 4 bytes
 <unique id> - variable size
 <scheme> - variable size
 <records array> - variable size
 
 Structure of table scheme:
-<amount of column headers> - 4 bytes
+<size of column headers> - 4 bytes
 <columns headers> - variable length
+column headers appear consecutively on disk one after the other.
 
 Structure of column header:
 <column type> - 1 byte
@@ -74,6 +74,7 @@ const DB_POINTER_SIZE uint32 = 8
 const DATA_BLOCK_SIZE_SIZE uint32 = 4
 const LOCAL_DB_CONST_SIZE = 4
 const BITMAP_POINTER_OFFSET = LOCAL_DB_CONST_SIZE + DATA_BLOCK_SIZE_SIZE
+const TABLES_POINTER_OFFSET = BITMAP_POINTER_OFFSET + DB_POINTER_SIZE
 
 // According to the description of the DB header
 const DB_HEADER_SIZE = LOCAL_DB_CONST_SIZE + DATA_BLOCK_SIZE_SIZE + 2*DB_POINTER_SIZE
@@ -97,6 +98,35 @@ type dbHeader struct {
 type openDB struct {
 	f      *os.File
 	header dbHeader
+}
+
+// DB IO utils
+
+func uint32ToBytes(num uint32) []byte {
+	b := make([]byte, 4)
+	binary.LittleEndian.PutUint32(b, num)
+	return b
+}
+
+func readFromFile(f *os.File, size uint32, offset uint32) []byte {
+	f.Seek(int64(offset), 0)
+
+	pointerData := make([]byte, size)
+	sizeRead, err := f.Read(pointerData)
+	check(err)
+	assert(sizeRead == int(size), "Failed to read the size requested from db file")
+	return pointerData
+}
+
+func readFromDB(db *openDB, size uint32, offset uint32) []byte {
+	return readFromFile(db.f, size, offset)
+}
+
+func writeVariableSizeDataToDB(db *openDB, data []byte, offset uint32) {
+	sizeData := uint32ToBytes(uint32(len(data)))
+	db.f.Seek(int64(offset), 0)
+	db.f.Write(sizeData)
+	db.f.Write(data)
 }
 
 func readDataBlock(db *openDB, offset uint32) ([]byte, uint32) {
@@ -175,6 +205,11 @@ func deserializeDbHeader(data []byte) dbHeader {
 		bitmapPointer: bitmapPointer, tablesPointer: tablesPointer}
 }
 
+func getDbPointer(db *openDB, pointerOffset uint32) dbPointer {
+	pointerData := readFromDB(db, DB_POINTER_SIZE, pointerOffset)
+	return deserializeDbPointer(pointerData)
+}
+
 func findFirstAvailableBlock(bitmap []byte) uint32 {
 	res := uint32(0)
 	for _, b := range bitmap {
@@ -190,8 +225,24 @@ func findFirstAvailableBlock(bitmap []byte) uint32 {
 	return res
 }
 
-func appendDataToDataBlock(db *openDB, newData []byte) {
-	// TODO: implement
+// pointerOffset is the offset of the data block pointer in the file
+func appendDataToDataBlock(db *openDB, newData []byte, pointerOffset uint32) {
+	db.f.Seek(int64(pointerOffset), 0)
+	pointerData := make([]byte, DB_POINTER_SIZE)
+	sizeRead, err := db.f.Read(pointerData)
+	check(err)
+	assert(sizeRead == int(DB_POINTER_SIZE), "Failed to read db pointer")
+	previousPointer := deserializeDbPointer(pointerData)
+	newSize := previousPointer.size + uint32(len(newData))
+	newSizeData := make([]byte, 4)
+	binary.LittleEndian.PutUint32(newSizeData, newSize)
+	db.f.Seek(int64(pointerOffset)+4, 0) // go the location of the pointer's size
+	db.f.Write(newSizeData)
+
+	// TODO: allow extending to new data blocks if necessary
+	// (currently a bug will occur when the data block reaches its maximal block size)
+	db.f.Seek(int64(previousPointer.offset)+int64(previousPointer.size), 0)
+	db.f.Write(newData)
 }
 
 func min(a int, b int) int {
@@ -235,7 +286,7 @@ func writeBitToBitmap(db *openDB, index uint32, newValue uint8) {
 			panic(InsufficientWriteError{DB_POINTER_SIZE, n})
 		}
 		// just add a byte to the bitmap, we'll override it soon
-		appendDataToDataBlock(db, make([]byte, 1))
+		appendDataToDataBlock(db, make([]byte, 1), BITMAP_POINTER_OFFSET)
 	}
 	// Now update the bitmap's data
 	bitmapData := readFromDbPointer(db, db.header.bitmapPointer)
@@ -260,29 +311,86 @@ func allocateNewDataBlock(db *openDB) dbPointer {
 	return dbPointer{offset: uint32(blockOffset), size: 0}
 }
 
-func writeNewTableLocalFile(scheme tableScheme, db database) {
+func addNewTableToTablesArray(db *openDB, newTablePointer dbPointer) {
+	// Get the table array db pointer
+	tableArrayPointer := getDbPointer(db, TABLES_POINTER_OFFSET)
+	db.f.Seek(int64(TABLES_POINTER_OFFSET), 0)
+
+	// Increase the size of the table array
+	tablesArrayData := readFromDbPointer(db, tableArrayPointer)
+	tableArraySize := binary.LittleEndian.Uint32(tablesArrayData[:4])
+	tableArraySize++
+	tableArraySizeData := make([]byte, 4)
+	binary.LittleEndian.PutUint32(tableArraySizeData, tableArraySize)
+	writeToDataBlock(db, tableArrayPointer, tablesArrayData, 0)
+
+	// Write the new table's pointer to the end of the table array
+	serializedPointer := serializeDbPointer(newTablePointer)
+	appendDataToDataBlock(db, serializedPointer, TABLES_POINTER_OFFSET)
+}
+
+func writeTableScheme(db *openDB, scheme tableScheme, pointer dbPointer, offset uint32) int {
+	schemeData := make([]byte, 4) // column headers size will contain unitialized data at first
+	headersSize := 0
+	for _, columnHeader := range scheme.columns {
+		schemeData = append(schemeData, byte(columnHeader.columnType))
+		columnNameSizeBytes := make([]byte, 4)
+		binary.LittleEndian.PutUint32(columnNameSizeBytes, uint32(len(columnHeader.columnName)))
+		schemeData = append(schemeData, columnNameSizeBytes...)
+		schemeData = append(schemeData, []byte(columnHeader.columnName)...)
+		headersSize += 1 + 4 + len(columnHeader.columnName)
+	}
+	writeToDataBlock(db, pointer, schemeData, offset)
+	return len(schemeData)
+}
+
+func initializeNewTableContent(db *openDB, tableID string, scheme tableScheme, pointer *dbPointer) {
+	// Write table ID
+	tableIDBytes := []byte(tableID)
+	writeVariableSizeDataToDB(db, tableIDBytes, pointer.offset)
+	offsetInDataBlock := 4 + len(tableIDBytes)
+
+	// Write scheme
+	offsetInDataBlock += writeTableScheme(db, scheme, *pointer, uint32(offsetInDataBlock))
+
+	// Write records array, which is empty...
+	recordsArraySizeBytes := uint32ToBytes(0)
+	writeToDataBlock(db, *pointer, recordsArraySizeBytes, uint32(offsetInDataBlock))
+	offsetInDataBlock += 4
+
+	// Update the size of the table's db pointer
+	pointer.size = uint32(offsetInDataBlock)
+}
+
+func writeNewTableLocalFile(db database, tableID string, scheme tableScheme) {
 	dbPath := db.id.identifyingString
 	// TODO: change this to allow multiple read-writes at the same time
 	f, err := os.OpenFile(dbPath, os.O_RDWR, os.ModeExclusive)
 	defer f.Close()
 	check(err)
 
-	headerData := make([]byte, DB_HEADER_SIZE)
-	n, err := f.Read(headerData)
-	check(err)
-	if n < int(DB_HEADER_SIZE) {
-		panic(ReadError{})
-	}
+	headerData := readFromFile(f, DB_HEADER_SIZE, 0)
 	header := deserializeDbHeader(headerData)
 	openDatabase := openDB{f: f, header: header}
-	newDatabasePointer := allocateNewDataBlock(&openDatabase)
-	// TODO: write table into newly allocated data block, update pointer and add it into
-	// the tables array
+	newTablePointer := allocateNewDataBlock(&openDatabase)
+	initializeNewTableContent(&openDatabase, tableID, scheme, &newTablePointer)
+	addNewTableToTablesArray(&openDatabase, newTablePointer)
 }
 
-func writeNewTable(scheme tableScheme, db database) {
+func writeNewTable(db database, tableID string, scheme tableScheme) {
 	if db.id.ioType != LocalFile {
 		panic(UnsupportedError{})
 	}
-	writeNewTableLocalFile(scheme, db)
+	// TODO: validate no other table exists with this tableID
+
+	writeNewTableLocalFile(db, tableID, scheme)
+}
+
+func initializeDB(path string) {
+	f, err := os.OpenFile(path, os.O_RDWR, os.ModeExclusive)
+	defer f.Close()
+	check(err)
+
+	// TODO: implement initialization of the DB
+	// Note that a few data blocks must be reserved for the header, bitmap, and the tables array
 }
