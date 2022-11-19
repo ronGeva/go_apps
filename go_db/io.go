@@ -2,6 +2,7 @@ package go_db
 
 import (
 	"encoding/binary"
+	"io"
 	"os"
 )
 
@@ -86,6 +87,11 @@ type fileDB struct {
 type dbPointer struct {
 	offset uint32
 	size   uint32
+}
+
+type mutableDbPointer struct {
+	pointer  dbPointer
+	location int64
 }
 
 type dbHeader struct {
@@ -175,7 +181,7 @@ func readFromDbPointer(db *openDB, pointer dbPointer) []byte {
 func serializeDbPointer(pointer dbPointer) []byte {
 	res := make([]byte, DB_POINTER_SIZE)
 	binary.LittleEndian.PutUint32(res, pointer.offset)
-	binary.LittleEndian.PutUint32(res, pointer.size)
+	binary.LittleEndian.PutUint32(res[4:], pointer.size)
 	return res
 }
 
@@ -213,20 +219,25 @@ func getDbPointer(db *openDB, pointerOffset uint32) dbPointer {
 func findFirstAvailableBlock(bitmap []byte) uint32 {
 	res := uint32(0)
 	for _, b := range bitmap {
-		for b > 0 {
-			if (b ^ 1) == 1 {
+		if b == 0xff {
+			res += 8
+			continue
+		}
+
+		for i := 0; i < 8; i++ {
+			if (b & 1) == 0 {
 				return res
 			}
 			b >>= 1
 			res += 1
 		}
-		res += 8
 	}
 	return res
 }
 
 // pointerOffset is the offset of the data block pointer in the file
-func appendDataToDataBlock(db *openDB, newData []byte, pointerOffset uint32) {
+// returns the absolute offset in the file in which the write has ended.
+func appendDataToDataBlock(db *openDB, newData []byte, pointerOffset uint32) int64 {
 	db.f.Seek(int64(pointerOffset), 0)
 	pointerData := make([]byte, DB_POINTER_SIZE)
 	sizeRead, err := db.f.Read(pointerData)
@@ -243,6 +254,11 @@ func appendDataToDataBlock(db *openDB, newData []byte, pointerOffset uint32) {
 	// (currently a bug will occur when the data block reaches its maximal block size)
 	db.f.Seek(int64(previousPointer.offset)+int64(previousPointer.size), 0)
 	db.f.Write(newData)
+	finalOffset, err := db.f.Seek(0, io.SeekCurrent)
+	if err != nil {
+		panic(err)
+	}
+	return finalOffset
 }
 
 func min(a int, b int) int {
@@ -311,7 +327,7 @@ func allocateNewDataBlock(db *openDB) dbPointer {
 	return dbPointer{offset: uint32(blockOffset), size: 0}
 }
 
-func addNewTableToTablesArray(db *openDB, newTablePointer dbPointer) {
+func addNewTableToTablesArray(db *openDB, newTablePointer dbPointer) mutableDbPointer {
 	// Get the table array db pointer
 	tableArrayPointer := getDbPointer(db, TABLES_POINTER_OFFSET)
 	db.f.Seek(int64(TABLES_POINTER_OFFSET), 0)
@@ -326,10 +342,12 @@ func addNewTableToTablesArray(db *openDB, newTablePointer dbPointer) {
 
 	// Write the new table's pointer to the end of the table array
 	serializedPointer := serializeDbPointer(newTablePointer)
-	appendDataToDataBlock(db, serializedPointer, TABLES_POINTER_OFFSET)
+	writeOffset := appendDataToDataBlock(db, serializedPointer, TABLES_POINTER_OFFSET)
+	pointerLocation := writeOffset - int64(DB_POINTER_SIZE)
+	return mutableDbPointer{pointer: newTablePointer, location: pointerLocation}
 }
 
-func writeTableScheme(db *openDB, scheme tableScheme, pointer dbPointer, offset uint32) int {
+func writeTableScheme(db *openDB, scheme tableScheme, mutablePointer mutableDbPointer, offset uint32) uint32 {
 	schemeData := make([]byte, 4) // column headers size will contain unitialized data at first
 	headersSize := 0
 	for _, columnHeader := range scheme.columns {
@@ -340,26 +358,25 @@ func writeTableScheme(db *openDB, scheme tableScheme, pointer dbPointer, offset 
 		schemeData = append(schemeData, []byte(columnHeader.columnName)...)
 		headersSize += 1 + 4 + len(columnHeader.columnName)
 	}
-	writeToDataBlock(db, pointer, schemeData, offset)
-	return len(schemeData)
+	appendDataToDataBlock(db, schemeData, uint32(mutablePointer.location))
+	return uint32(len(schemeData))
 }
 
-func initializeNewTableContent(db *openDB, tableID string, scheme tableScheme, pointer *dbPointer) {
+func initializeNewTableContent(db *openDB, tableID string, scheme tableScheme, mutablePointer *mutableDbPointer) {
+	pointer := &mutablePointer.pointer
+
 	// Write table ID
 	tableIDBytes := []byte(tableID)
 	writeVariableSizeDataToDB(db, tableIDBytes, pointer.offset)
-	offsetInDataBlock := 4 + len(tableIDBytes)
+	mutablePointer.pointer.size = uint32(4 + len(tableIDBytes))
 
 	// Write scheme
-	offsetInDataBlock += writeTableScheme(db, scheme, *pointer, uint32(offsetInDataBlock))
+	mutablePointer.pointer.size += writeTableScheme(db, scheme, *mutablePointer, uint32(mutablePointer.pointer.size))
 
 	// Write records array, which is empty...
 	recordsArraySizeBytes := uint32ToBytes(0)
-	writeToDataBlock(db, *pointer, recordsArraySizeBytes, uint32(offsetInDataBlock))
-	offsetInDataBlock += 4
-
-	// Update the size of the table's db pointer
-	pointer.size = uint32(offsetInDataBlock)
+	appendDataToDataBlock(db, recordsArraySizeBytes, uint32(mutablePointer.location))
+	mutablePointer.pointer.size += 4
 }
 
 func writeNewTableLocalFile(db database, tableID string, scheme tableScheme) {
@@ -373,8 +390,8 @@ func writeNewTableLocalFile(db database, tableID string, scheme tableScheme) {
 	header := deserializeDbHeader(headerData)
 	openDatabase := openDB{f: f, header: header}
 	newTablePointer := allocateNewDataBlock(&openDatabase)
-	initializeNewTableContent(&openDatabase, tableID, scheme, &newTablePointer)
-	addNewTableToTablesArray(&openDatabase, newTablePointer)
+	mutablePointer := addNewTableToTablesArray(&openDatabase, newTablePointer)
+	initializeNewTableContent(&openDatabase, tableID, scheme, &mutablePointer)
 }
 
 func writeNewTable(db database, tableID string, scheme tableScheme) {
@@ -386,11 +403,39 @@ func writeNewTable(db database, tableID string, scheme tableScheme) {
 	writeNewTableLocalFile(db, tableID, scheme)
 }
 
-func initializeDB(path string) {
-	f, err := os.OpenFile(path, os.O_RDWR, os.ModeExclusive)
+// For testing
+func WriteNewTable(db database, tableID string, scheme tableScheme) {
+	writeNewTable(db, tableID, scheme)
+}
+
+// TODO: make private in the future
+func InitializeDB(path string) {
+	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0)
 	defer f.Close()
 	check(err)
 
 	// TODO: implement initialization of the DB
 	// Note that a few data blocks must be reserved for the header, bitmap, and the tables array
+	// 3 blocks are necessary
+	dataBlockSize := 1024 // TODO: make dynamic
+	f.Write(make([]byte, dataBlockSize*3))
+	f.Seek(0, 0)
+
+	// we're already using the first 4 bytes in the bitmap and in the tables array
+	bitmapPointer := dbPointer{offset: uint32(dataBlockSize), size: 4}
+	tablePointer := dbPointer{offset: 2 * uint32(dataBlockSize), size: 4}
+
+	dbMagicBytes := uint32ToBytes(LOCAL_DB_CONST)
+	dataBlockSizeBytes := uint32ToBytes(uint32(dataBlockSize))
+	f.Write(dbMagicBytes)
+	f.Write(dataBlockSizeBytes)
+	f.Write(serializeDbPointer(bitmapPointer))
+	f.Write(serializeDbPointer(tablePointer))
+
+	// write bitmap
+	f.Seek(int64(dataBlockSize), 0)
+	f.Write(uint32ToBytes(7)) // first three blocks are taken
+	// write tables array
+	f.Seek(2*int64(dataBlockSize), 0)
+	f.Write(uint32ToBytes(0))
 }
