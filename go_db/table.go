@@ -2,7 +2,6 @@ package go_db
 
 import (
 	"encoding/binary"
-	"os"
 )
 
 type columndHeader struct {
@@ -39,22 +38,10 @@ func (t *table) addRecord(record *Record) {
 
 func addNewTableToTablesArray(db *openDB, newTablePointer dbPointer) mutableDbPointer {
 	// Get the table array db pointer
-	tableArrayPointer := getDbPointer(db, TABLES_POINTER_OFFSET)
-	db.f.Seek(int64(TABLES_POINTER_OFFSET), 0)
-
-	// Increase the size of the table array
-	tablesArrayData := readFromDbPointer(db, tableArrayPointer)
-	tableArraySize := binary.LittleEndian.Uint32(tablesArrayData[:4])
-	tableArraySize++
-	tableArraySizeData := make([]byte, 4)
-	binary.LittleEndian.PutUint32(tableArraySizeData, tableArraySize)
-	writeToDataBlock(db, tableArrayPointer, tablesArrayData, 0)
-
-	// Write the new table's pointer to the end of the table array
-	serializedPointer := serializeDbPointer(newTablePointer)
-	writeOffset := appendDataToDataBlock(db, serializedPointer, TABLES_POINTER_OFFSET)
-	pointerLocation := writeOffset - int64(DB_POINTER_SIZE)
-	return mutableDbPointer{pointer: newTablePointer, location: pointerLocation}
+	tableArrayPointer := getMutableDbPointer(db, TABLES_POINTER_OFFSET)
+	tablePointerData := serializeDbPointer(newTablePointer)
+	endOfWrite := appendDataToDataBlock(db, tablePointerData, uint32(tableArrayPointer.location))
+	return mutableDbPointer{pointer: newTablePointer, location: endOfWrite - int64(DB_POINTER_SIZE)}
 }
 
 func writeTableScheme(db *openDB, scheme tableScheme, mutablePointer mutableDbPointer, offset uint32) uint32 {
@@ -68,37 +55,40 @@ func writeTableScheme(db *openDB, scheme tableScheme, mutablePointer mutableDbPo
 		schemeData = append(schemeData, []byte(columnHeader.columnName)...)
 		headersSize += 1 + 4 + len(columnHeader.columnName)
 	}
+	// Put the size of the scheme data at the start of it
+	binary.LittleEndian.PutUint32(schemeData[:4], uint32(len(schemeData)-4))
 	appendDataToDataBlock(db, schemeData, uint32(mutablePointer.location))
 	return uint32(len(schemeData))
 }
 
-func initializeNewTableContent(db *openDB, tableID string, scheme tableScheme, mutablePointer *mutableDbPointer) {
-	pointer := &mutablePointer.pointer
-
+func initializeNewTableContent(db *openDB, tableID string, scheme tableScheme, tablePointer *mutableDbPointer) {
 	// Write table ID
 	tableIDBytes := []byte(tableID)
-	writeVariableSizeDataToDB(db, tableIDBytes, pointer.offset)
-	mutablePointer.pointer.size = uint32(4 + len(tableIDBytes))
+	appendDataToDataBlock(db, serializeVariableSizeData(tableIDBytes), uint32(tablePointer.location))
+	tablePointer.pointer.size = uint32(4 + len(tableIDBytes))
 
 	// Write scheme
-	mutablePointer.pointer.size += writeTableScheme(db, scheme, *mutablePointer, uint32(mutablePointer.pointer.size))
+	tablePointer.pointer.size += writeTableScheme(db, scheme, *tablePointer, uint32(tablePointer.pointer.size))
 
-	// Write records array, which is empty...
-	recordsArraySizeBytes := uint32ToBytes(0)
-	appendDataToDataBlock(db, recordsArraySizeBytes, uint32(mutablePointer.location))
-	mutablePointer.pointer.size += 4
+	// Allocate bitmap block
+	bitmapPointer := allocateNewDataBlock(db)
+	// Bitmap is empty, no need to write anything - there are 0 records
+
+	// Write bitmap pointer to table content
+	appendDataToDataBlock(db, serializeDbPointer(bitmapPointer), uint32(tablePointer.location))
+	tablePointer.pointer.size += DB_POINTER_SIZE
+
+	// Allocate records array block
+	recordsPointer := allocateNewDataBlock(db)
+
+	// Write records array pointer to table content
+	appendDataToDataBlock(db, serializeDbPointer(recordsPointer), uint32(tablePointer.location))
+	tablePointer.pointer.size += DB_POINTER_SIZE
 }
 
 func writeNewTableLocalFile(db database, tableID string, scheme tableScheme) {
-	dbPath := db.id.identifyingString
-	// TODO: change this to allow multiple read-writes at the same time
-	f, err := os.OpenFile(dbPath, os.O_RDWR, os.ModeExclusive)
-	defer f.Close()
-	check(err)
-
-	headerData := readFromFile(f, DB_HEADER_SIZE, 0)
-	header := deserializeDbHeader(headerData)
-	openDatabase := openDB{f: f, header: header}
+	openDatabase := getOpenDB(db)
+	defer closeOpenDB(&openDatabase)
 	newTablePointer := allocateNewDataBlock(&openDatabase)
 	mutablePointer := addNewTableToTablesArray(&openDatabase, newTablePointer)
 	initializeNewTableContent(&openDatabase, tableID, scheme, &mutablePointer)
@@ -116,4 +106,56 @@ func writeNewTable(db database, tableID string, scheme tableScheme) {
 // For testing
 func WriteNewTable(db database, tableID string, scheme tableScheme) {
 	writeNewTable(db, tableID, scheme)
+}
+
+func findTable(openDatabse *openDB, tableID string) (*dbPointer, error) {
+	tablesPointer := getDbPointer(openDatabse, TABLES_POINTER_OFFSET)
+	tablesArrayBytes := readFromDbPointer(openDatabse, tablesPointer)
+	for i := 0; i < len(tablesArrayBytes)/int(DB_POINTER_SIZE); i++ {
+		currPointer := deserializeDbPointer(
+			tablesArrayBytes[i*int(DB_POINTER_SIZE) : (i+1)*int(DB_POINTER_SIZE)])
+		uniqueID := readVariableSizeDataFromDB(openDatabse, currPointer.offset)
+		if string(uniqueID) == tableID {
+			return &currPointer, nil
+		}
+	}
+	return nil, &TableNotFoundError{tableID}
+}
+
+func writeRecordToTable(db *openDB, recordsPointer mutableDbPointer, recordIndex uint32, data []byte) {
+	// Find the offset of the new record
+	// TODO: handle data block extension
+	prevAmountOfRecords := recordsPointer.pointer.size / DB_POINTER_SIZE
+	if prevAmountOfRecords > recordIndex {
+		// Override pre-existing invalid record
+		offset := DB_POINTER_SIZE * recordIndex
+		writeToDataBlock(db, recordsPointer.pointer, data, uint32(offset))
+	} else {
+		// Write a new record
+		appendDataToDataBlock(db, data, uint32(recordsPointer.location))
+	}
+}
+
+func addRecordToTableInternal(db *openDB, tablePointer dbPointer, recordData []byte) {
+	uniqueIDSize := binary.LittleEndian.Uint32(readFromDB(db, 4, tablePointer.offset))
+	schemeOffset := tablePointer.offset + 4 + uniqueIDSize
+	schemeSize := binary.LittleEndian.Uint32(readFromDB(db, 4, schemeOffset))
+	bitmapOffset := schemeOffset + 4 + schemeSize
+	bitmapPointer := getDbPointer(db, bitmapOffset)
+	bitmapData := readFromDbPointer(db, bitmapPointer)
+	firstAvailableRecordNum := findFirstAvailableBlock(bitmapData)
+	recordsArrayPointerOffset := bitmapOffset + DB_POINTER_SIZE
+	recordsArrayPointer := getMutableDbPointer(db, recordsArrayPointerOffset)
+	writeRecordToTable(db, recordsArrayPointer, firstAvailableRecordNum, recordData)
+	writeBitToBitmap(db, int64(bitmapOffset), firstAvailableRecordNum, 1)
+}
+
+func addRecordToTable(db database, tableID string, record Record) {
+	openDatabse := getOpenDB(db)
+	defer closeOpenDB(&openDatabse)
+
+	recordData := serializeRecord(&openDatabse, record)
+	tablePointer, err := findTable(&openDatabse, tableID)
+	check(err)
+	addRecordToTableInternal(&openDatabse, *tablePointer, recordData)
 }

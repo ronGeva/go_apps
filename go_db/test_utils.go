@@ -17,3 +17,7 @@ func CreateNewTableForTest(tableID string, newTableScheme TestScheme, path strin
 	}
 	WriteNewTable(db, tableID, scheme)
 }
+
+func AddRecordToTable(db database, tableID string, record Record) {
+	addRecordToTable(db, tableID, record)
+}

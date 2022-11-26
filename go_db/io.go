@@ -62,11 +62,23 @@ func readFromDB(db *openDB, size uint32, offset uint32) []byte {
 	return readFromFile(db.f, size, offset)
 }
 
+func serializeVariableSizeData(data []byte) []byte {
+	res := make([]byte, len(data)+4)
+	binary.LittleEndian.PutUint32(res[:4], uint32(len(data)))
+	copy(res[4:], data)
+	return res
+}
+
 func writeVariableSizeDataToDB(db *openDB, data []byte, offset uint32) {
-	sizeData := uint32ToBytes(uint32(len(data)))
+	dataWithSizePrefix := serializeVariableSizeData(data)
 	db.f.Seek(int64(offset), 0)
-	db.f.Write(sizeData)
-	db.f.Write(data)
+	db.f.Write(dataWithSizePrefix)
+}
+
+func readVariableSizeDataFromDB(db *openDB, offset uint32) []byte {
+	sizeBytes := readFromDB(db, 4, offset)
+	size := binary.LittleEndian.Uint32(sizeBytes)
+	return readFromDB(db, size, offset+4)
 }
 
 func readDataBlock(db *openDB, offset uint32) ([]byte, uint32) {
@@ -134,6 +146,11 @@ func getDbPointer(db *openDB, pointerOffset uint32) dbPointer {
 	return deserializeDbPointer(pointerData)
 }
 
+func getMutableDbPointer(db *openDB, pointerOffset uint32) mutableDbPointer {
+	pointer := getDbPointer(db, pointerOffset)
+	return mutableDbPointer{pointer: pointer, location: int64(pointerOffset)}
+}
+
 // pointerOffset is the offset of the data block pointer in the file
 // returns the absolute offset in the file in which the write has ended.
 func appendDataToDataBlock(db *openDB, newData []byte, pointerOffset uint32) int64 {
@@ -146,9 +163,12 @@ func appendDataToDataBlock(db *openDB, newData []byte, pointerOffset uint32) int
 	newSize := previousPointer.size + uint32(len(newData))
 	newSizeData := make([]byte, 4)
 	binary.LittleEndian.PutUint32(newSizeData, newSize)
+
+	// Write new pointer size
 	db.f.Seek(int64(pointerOffset)+4, 0) // go the location of the pointer's size
 	db.f.Write(newSizeData)
 
+	// Write new data to data block
 	// TODO: allow extending to new data blocks if necessary
 	// (currently a bug will occur when the data block reaches its maximal block size)
 	db.f.Seek(int64(previousPointer.offset)+int64(previousPointer.size), 0)

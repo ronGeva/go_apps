@@ -25,14 +25,14 @@ Each bit in the free blocks bitmap represents whether the i-th data block in the
 to use.
 
 Structure of tables array:
-<size of tables array> - 4 bytes
 <tables array> - <db pointer size> * <size>, each entry is a db pointer
 
 Structure of table:
 <size of unique ID> - 4 bytes
 <unique id> - variable size
 <scheme> - variable size
-<records array> - variable size
+<table bitmap pointer> - <db pointer size>
+<records array pointer> - <db pointer size>
 
 Structure of table scheme:
 <size of column headers> - 4 bytes
@@ -44,10 +44,16 @@ Structure of column header:
 <size of column name> - 4 bytes
 <column name> - variable length
 
+Structure of table bitmap
+<bits> - <size of bitmap>
+Each bit represents whether the i-th record in the table is valid or not.
+Deleted records become invalid.
+Future inserted records are only added as a new record if there are no
+invalid records in the table.
+
 Structure of records array:
-<records array size> - 4 bytes
 <records array> - <db pointer size> * <records table size>
-Each cell in the records array contains the offset in the DB file in which the record lies.
+Each cell in the records array contains a DB pointer describing the record.
 
 Data blocks structure:
 A data block is a sequence of <data block size> - 4 bytes of data, whose structure is defined
@@ -60,8 +66,8 @@ const LOCAL_DB_CONST uint32 = 0x1414ffbc
 const DB_POINTER_SIZE uint32 = 8
 const DATA_BLOCK_SIZE_SIZE uint32 = 4
 const LOCAL_DB_CONST_SIZE = 4
-const BITMAP_POINTER_OFFSET = LOCAL_DB_CONST_SIZE + DATA_BLOCK_SIZE_SIZE
-const TABLES_POINTER_OFFSET = BITMAP_POINTER_OFFSET + DB_POINTER_SIZE
+const DATABLOCK_BITMAP_POINTER_OFFSET = LOCAL_DB_CONST_SIZE + DATA_BLOCK_SIZE_SIZE
+const TABLES_POINTER_OFFSET = DATABLOCK_BITMAP_POINTER_OFFSET + DB_POINTER_SIZE
 
 // According to the description of the DB header
 const DB_HEADER_SIZE = LOCAL_DB_CONST_SIZE + DATA_BLOCK_SIZE_SIZE + 2*DB_POINTER_SIZE
@@ -106,7 +112,7 @@ func InitializeDB(path string) {
 
 	// we're already using the first 4 bytes in the bitmap and in the tables array
 	bitmapPointer := dbPointer{offset: uint32(dataBlockSize), size: 4}
-	tablePointer := dbPointer{offset: 2 * uint32(dataBlockSize), size: 4}
+	tablePointer := dbPointer{offset: 2 * uint32(dataBlockSize), size: 0}
 
 	dbMagicBytes := uint32ToBytes(LOCAL_DB_CONST)
 	dataBlockSizeBytes := uint32ToBytes(uint32(dataBlockSize))
@@ -118,7 +124,31 @@ func InitializeDB(path string) {
 	// write bitmap
 	f.Seek(int64(dataBlockSize), 0)
 	f.Write(uint32ToBytes(7)) // first three blocks are taken
+
 	// write tables array
-	f.Seek(2*int64(dataBlockSize), 0)
-	f.Write(uint32ToBytes(0))
+	// Nothing to write - table array is initialized as empty
+}
+
+func getOpenDB(db database) openDB {
+	dbPath := db.id.identifyingString
+	// TODO: change this to allow multiple read-writes at the same time
+	f, err := os.OpenFile(dbPath, os.O_RDWR, os.ModeExclusive)
+	check(err)
+
+	headerData := readFromFile(f, DB_HEADER_SIZE, 0)
+	header := deserializeDbHeader(headerData)
+	return openDB{f: f, header: header}
+}
+
+func closeOpenDB(db *openDB) {
+	db.f.Close()
+}
+
+func GenerateDBUniqueID(identifier string) databaseUniqueID {
+	// TODO: validate identifier is valid, check DB type
+	return databaseUniqueID{ioType: LocalFile, identifyingString: identifier}
+}
+
+func GetDB(identifier databaseUniqueID) database {
+	return database{identifier}
 }

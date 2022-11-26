@@ -19,20 +19,20 @@ func findFirstAvailableBlock(bitmap []byte) uint32 {
 	return res
 }
 
-func writeBitToBitmap(db *openDB, index uint32, newValue uint8) {
+func writeBitToBitmap(db *openDB, bitmapPointerOffset int64, index uint32, newValue uint8) {
 	assert(((newValue == 0) || (newValue == 1)), "Illegal bit value "+string(newValue))
 	if index/8 >= db.header.bitmapPointer.size {
 		// We increase the size of the bitmap, and update it on disk
 		db.header.bitmapPointer.size += 1
-		db.f.Seek(int64(BITMAP_POINTER_OFFSET), 0)
+		db.f.Seek(bitmapPointerOffset, 0)
 		bitmapPointerData := serializeDbPointer(db.header.bitmapPointer)
 		n, err := db.f.Write(bitmapPointerData)
 		check(err)
-		if n < int(BITMAP_POINTER_OFFSET) {
+		if n < int(DATABLOCK_BITMAP_POINTER_OFFSET) {
 			panic(InsufficientWriteError{DB_POINTER_SIZE, n})
 		}
 		// just add a byte to the bitmap, we'll override it soon
-		appendDataToDataBlock(db, make([]byte, 1), BITMAP_POINTER_OFFSET)
+		appendDataToDataBlock(db, make([]byte, 1), uint32(bitmapPointerOffset))
 	}
 	// Now update the bitmap's data
 	bitmapData := readFromDbPointer(db, db.header.bitmapPointer)
@@ -46,7 +46,7 @@ func writeBitToBitmap(db *openDB, index uint32, newValue uint8) {
 func allocateNewDataBlock(db *openDB) dbPointer {
 	blockBitmap := readFromDbPointer(db, db.header.bitmapPointer)
 	blockIndex := findFirstAvailableBlock(blockBitmap)
-	writeBitToBitmap(db, blockIndex, 1)
+	writeBitToBitmap(db, int64(DATABLOCK_BITMAP_POINTER_OFFSET), blockIndex, 1)
 	// Now add the actual data block to the file
 	blockOffset := int64(blockIndex) * int64(db.header.dataBlockSize)
 	db.f.Seek(blockOffset, 0)

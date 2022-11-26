@@ -59,6 +59,14 @@ func (err *AssertionError) Error() string {
 	return err.assertionMessage
 }
 
+type TableNotFoundError struct {
+	identifier string
+}
+
+func (err *TableNotFoundError) Error() string {
+	return "Failed to find table with ID " + err.identifier
+}
+
 func assert(b bool, msg string) {
 	if !b {
 		panic(AssertionError{msg})
