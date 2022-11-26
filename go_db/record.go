@@ -31,3 +31,27 @@ func serializeRecord(openDatabse *openDB, record Record) []byte {
 	}
 	return recordData
 }
+
+func getRecordData(db *openDB, recordData []byte) []byte {
+	pointer := deserializeDbPointer(recordData)
+	return readAllDataFromDbPointer(db, pointer)
+}
+
+func deserializeRecord(db *openDB, recordData []byte, tableScheme tableScheme) Record {
+	columnsInData := len(recordData) / int(DB_POINTER_SIZE)
+	assert(columnsInData == len(tableScheme.columns),
+		"mismatching column amount between table scheme and data given: "+
+			string(columnsInData)+", "+string(len(tableScheme.columns)))
+
+	fields := make([]Field, 0)
+	for i := 0; i < columnsInData; i++ {
+		currPointerData := recordData[i*int(DB_POINTER_SIZE) : int((i+1))*int(DB_POINTER_SIZE)]
+		currPointer := deserializeDbPointer(currPointerData)
+		currData := readAllDataFromDbPointer(db, currPointer)
+		switch tableScheme.columns[i].columnType {
+		case FieldTypeInt:
+			fields = append(fields, deserializeIntField(currData))
+		}
+	}
+	return Record{fields: fields}
+}

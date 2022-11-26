@@ -22,13 +22,19 @@ type IntField struct {
 	Value int
 }
 
-func (field *IntField) getType() FieldType {
+func (field IntField) getType() FieldType {
 	return FieldTypeInt
 }
 
-func (field *IntField) serialize() []byte {
+func (field IntField) serialize() []byte {
 	res := make([]byte, 4)
 
 	binary.LittleEndian.PutUint32(res, uint32(field.Value))
 	return res
+}
+
+func deserializeIntField(data []byte) IntField {
+	assert(len(data) == 4, "An invalid data length was given: "+string(len(data)))
+
+	return IntField{int(binary.LittleEndian.Uint32(data))}
 }

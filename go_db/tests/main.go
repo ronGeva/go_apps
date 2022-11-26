@@ -20,4 +20,10 @@ func main() {
 	newRecord := go_db.MakeRecord(fields)
 	db := go_db.GetDB(go_db.GenerateDBUniqueID(path))
 	go_db.AddRecordToTable(db, tableID, newRecord)
+	fields = []go_db.Field{&go_db.IntField{13}, &go_db.IntField{-12}}
+	newRecord = go_db.MakeRecord(fields)
+	go_db.AddRecordToTable(db, tableID, newRecord)
+
+	records := go_db.ReadAllRecords(db, tableID)
+	println(records)
 }

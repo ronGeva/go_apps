@@ -20,20 +20,10 @@ type recordID struct {
 	id int
 }
 
-type table struct {
-	scheme    tableScheme
-	recordIds []recordID
-}
-
-func createTable(scheme tableScheme, db database) *table {
-	return &table{scheme: scheme, recordIds: make([]recordID, 0)}
-}
-
-func (t *table) addRecord(record *Record) {
-	// write record to DB, get unique ID for it
-
-	recordID := recordID{len(t.recordIds)}
-	t.recordIds = append(t.recordIds, recordID)
+type tableHeaders struct {
+	scheme  tableScheme
+	bitmap  mutableDbPointer
+	records mutableDbPointer
 }
 
 func addNewTableToTablesArray(db *openDB, newTablePointer dbPointer) mutableDbPointer {
@@ -59,6 +49,19 @@ func writeTableScheme(db *openDB, scheme tableScheme, mutablePointer mutableDbPo
 	binary.LittleEndian.PutUint32(schemeData[:4], uint32(len(schemeData)-4))
 	appendDataToDataBlock(db, schemeData, uint32(mutablePointer.location))
 	return uint32(len(schemeData))
+}
+
+func parseTableScheme(schemeData []byte) tableScheme {
+	scheme := tableScheme{}
+	for i := 0; i < len(schemeData); {
+		columnType := int8(schemeData[i])
+		columnNameSize := binary.LittleEndian.Uint32(schemeData[i+1 : i+5])
+		columnName := string(schemeData[i+5 : i+5+int(columnNameSize)])
+		scheme.columns = append(scheme.columns,
+			columndHeader{columnType: FieldType(columnType), columnName: columnName})
+		i += 5 + int(columnNameSize)
+	}
+	return scheme
 }
 
 func initializeNewTableContent(db *openDB, tableID string, scheme tableScheme, tablePointer *mutableDbPointer) {
@@ -110,7 +113,7 @@ func WriteNewTable(db database, tableID string, scheme tableScheme) {
 
 func findTable(openDatabse *openDB, tableID string) (*dbPointer, error) {
 	tablesPointer := getDbPointer(openDatabse, TABLES_POINTER_OFFSET)
-	tablesArrayBytes := readFromDbPointer(openDatabse, tablesPointer)
+	tablesArrayBytes := readAllDataFromDbPointer(openDatabse, tablesPointer)
 	for i := 0; i < len(tablesArrayBytes)/int(DB_POINTER_SIZE); i++ {
 		currPointer := deserializeDbPointer(
 			tablesArrayBytes[i*int(DB_POINTER_SIZE) : (i+1)*int(DB_POINTER_SIZE)])
@@ -122,10 +125,12 @@ func findTable(openDatabse *openDB, tableID string) (*dbPointer, error) {
 	return nil, &TableNotFoundError{tableID}
 }
 
-func writeRecordToTable(db *openDB, recordsPointer mutableDbPointer, recordIndex uint32, data []byte) {
+func writeRecordToTable(db *openDB, headers tableHeaders, recordIndex uint32, data []byte) {
 	// Find the offset of the new record
 	// TODO: handle data block extension
-	prevAmountOfRecords := recordsPointer.pointer.size / DB_POINTER_SIZE
+
+	recordsPointer := headers.records
+	prevAmountOfRecords := recordsPointer.pointer.size / (DB_POINTER_SIZE * uint32(len(headers.scheme.columns)))
 	if prevAmountOfRecords > recordIndex {
 		// Override pre-existing invalid record
 		offset := DB_POINTER_SIZE * recordIndex
@@ -136,18 +141,29 @@ func writeRecordToTable(db *openDB, recordsPointer mutableDbPointer, recordIndex
 	}
 }
 
-func addRecordToTableInternal(db *openDB, tablePointer dbPointer, recordData []byte) {
+func parseTableHeaders(db *openDB, tablePointer dbPointer) tableHeaders {
 	uniqueIDSize := binary.LittleEndian.Uint32(readFromDB(db, 4, tablePointer.offset))
 	schemeOffset := tablePointer.offset + 4 + uniqueIDSize
 	schemeSize := binary.LittleEndian.Uint32(readFromDB(db, 4, schemeOffset))
+	schemeData := readFromDB(db, schemeSize, schemeOffset+4)
+	scheme := parseTableScheme(schemeData)
 	bitmapOffset := schemeOffset + 4 + schemeSize
 	bitmapPointer := getDbPointer(db, bitmapOffset)
-	bitmapData := readFromDbPointer(db, bitmapPointer)
+	recordsPointerOffset := bitmapOffset + DB_POINTER_SIZE
+	recordsPointer := getDbPointer(db, recordsPointerOffset)
+	return tableHeaders{scheme: scheme,
+		bitmap:  mutableDbPointer{pointer: bitmapPointer, location: int64(bitmapOffset)},
+		records: mutableDbPointer{pointer: recordsPointer, location: int64(recordsPointerOffset)},
+	}
+}
+
+func addRecordToTableInternal(db *openDB, tablePointer dbPointer, recordData []byte) {
+	headers := parseTableHeaders(db, tablePointer)
+	bitmapData := readAllDataFromDbPointer(db, headers.bitmap.pointer)
 	firstAvailableRecordNum := findFirstAvailableBlock(bitmapData)
-	recordsArrayPointerOffset := bitmapOffset + DB_POINTER_SIZE
-	recordsArrayPointer := getMutableDbPointer(db, recordsArrayPointerOffset)
-	writeRecordToTable(db, recordsArrayPointer, firstAvailableRecordNum, recordData)
-	writeBitToBitmap(db, int64(bitmapOffset), firstAvailableRecordNum, 1)
+
+	writeRecordToTable(db, headers, firstAvailableRecordNum, recordData)
+	writeBitToBitmap(db, int64(headers.bitmap.location), firstAvailableRecordNum, 1)
 }
 
 func addRecordToTable(db database, tableID string, record Record) {
@@ -158,4 +174,24 @@ func addRecordToTable(db database, tableID string, record Record) {
 	tablePointer, err := findTable(&openDatabse, tableID)
 	check(err)
 	addRecordToTableInternal(&openDatabse, *tablePointer, recordData)
+}
+
+func readAllRecords(db database, tableID string) []Record {
+	openDatabse := getOpenDB(db)
+	defer closeOpenDB(&openDatabse)
+
+	tablePointer, err := findTable(&openDatabse, tableID)
+	check(err)
+	headers := parseTableHeaders(&openDatabse, *tablePointer)
+
+	tableScheme := headers.scheme
+	recordsData := readAllDataFromDbPointer(&openDatabse, headers.records.pointer)
+	records := make([]Record, 0)
+	sizeOfRecord := int(DB_POINTER_SIZE) * len(tableScheme.columns)
+	for i := 0; i < len(recordsData)/sizeOfRecord; i++ {
+		recordData := recordsData[i*sizeOfRecord : (i+1)*sizeOfRecord]
+		records = append(records, deserializeRecord(&openDatabse, recordData, tableScheme))
+	}
+
+	return records
 }

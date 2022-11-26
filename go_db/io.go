@@ -98,12 +98,18 @@ func readDataBlock(db *openDB, offset uint32) ([]byte, uint32) {
 	return data, nextOffset
 }
 
-func readFromDbPointer(db *openDB, pointer dbPointer) []byte {
-	totalSize := pointer.size
-	data := make([]byte, totalSize)
+func readFromDbPointer(db *openDB, pointer dbPointer, size uint32) []byte {
+	if pointer.offset == 0 {
+		res := make([]byte, 4)
+		binary.LittleEndian.PutUint32(res, pointer.size)
+		return res // the size contains the actual value
+	}
+
+	data := make([]byte, size)
 	dataBlockSize := db.header.dataBlockSize
 	currentOffset := pointer.offset
-	for i := uint32(0); i < totalSize/dataBlockSize; i++ {
+	// Read all but the last data block (if it is partial)
+	for i := uint32(0); i < size/dataBlockSize; i++ {
 		if currentOffset == 0 {
 			panic(BadReadRequestError{})
 		}
@@ -113,15 +119,20 @@ func readFromDbPointer(db *openDB, pointer dbPointer) []byte {
 		copy(data[i*dataBlockSize:], newData)
 	}
 
-	if totalSize%dataBlockSize != 0 {
+	// Read the last partial data block (if there is one)
+	if size%dataBlockSize != 0 {
 		if currentOffset == 0 {
 			panic(BadReadRequestError{})
 		}
 
 		newData, _ := readDataBlock(db, currentOffset)
-		copy(data[totalSize-(totalSize%dataBlockSize):], newData)
+		copy(data[size-(size%dataBlockSize):], newData)
 	}
 	return data
+}
+
+func readAllDataFromDbPointer(db *openDB, pointer dbPointer) []byte {
+	return readFromDbPointer(db, pointer, pointer.size)
 }
 
 func serializeDbPointer(pointer dbPointer) []byte {

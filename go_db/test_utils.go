@@ -21,3 +21,7 @@ func CreateNewTableForTest(tableID string, newTableScheme TestScheme, path strin
 func AddRecordToTable(db database, tableID string, record Record) {
 	addRecordToTable(db, tableID, record)
 }
+
+func ReadAllRecords(db database, tableID string) []Record {
+	return readAllRecords(db, tableID)
+}

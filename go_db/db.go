@@ -103,14 +103,13 @@ func InitializeDB(path string) {
 	defer f.Close()
 	check(err)
 
-	// TODO: implement initialization of the DB
 	// Note that a few data blocks must be reserved for the header, bitmap, and the tables array
 	// 3 blocks are necessary
 	dataBlockSize := 1024 // TODO: make dynamic
 	f.Write(make([]byte, dataBlockSize*3))
 	f.Seek(0, 0)
 
-	// we're already using the first 4 bytes in the bitmap and in the tables array
+	// we're already using the first 4 bytes in the bitmap
 	bitmapPointer := dbPointer{offset: uint32(dataBlockSize), size: 4}
 	tablePointer := dbPointer{offset: 2 * uint32(dataBlockSize), size: 0}
 
