@@ -1,5 +1,19 @@
 package go_db
 
+func checkBitFromData(bitmap []byte, index int) bool {
+	return bool((int(bitmap[index/8]) & (1 << (index % 8))) != 0)
+}
+
+func checkBit(db *openDB, bitmap dbPointer, index int) bool {
+	if index >= int(bitmap.size)*8 {
+		return false // out of range
+	}
+	// TODO: use offset once it is implemented in readFromDbPointer
+	containingByte := uint32(index / 8)
+	data := readFromDbPointer(db, bitmap, containingByte+1)
+	return checkBitFromData(data, index)
+}
+
 func findFirstAvailableBlock(bitmap []byte) uint32 {
 	res := uint32(0)
 	for _, b := range bitmap {

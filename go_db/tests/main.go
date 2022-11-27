@@ -26,4 +26,8 @@ func main() {
 
 	records := go_db.ReadAllRecords(db, tableID)
 	println(records)
+
+	go_db.DeleteRecord(db, tableID, 1)
+	records = go_db.ReadAllRecords(db, tableID)
+	println(records)
 }

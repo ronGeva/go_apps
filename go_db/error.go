@@ -67,6 +67,13 @@ func (err *TableNotFoundError) Error() string {
 	return "Failed to find table with ID " + err.identifier
 }
 
+type RecordNotFoundError struct {
+}
+
+func (err *RecordNotFoundError) Error() string {
+	return "Record was not found"
+}
+
 func assert(b bool, msg string) {
 	if !b {
 		panic(AssertionError{msg})

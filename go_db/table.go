@@ -186,12 +186,30 @@ func readAllRecords(db database, tableID string) []Record {
 
 	tableScheme := headers.scheme
 	recordsData := readAllDataFromDbPointer(&openDatabse, headers.records.pointer)
+	bitmapData := readAllDataFromDbPointer(&openDatabse, headers.bitmap.pointer)
 	records := make([]Record, 0)
 	sizeOfRecord := int(DB_POINTER_SIZE) * len(tableScheme.columns)
 	for i := 0; i < len(recordsData)/sizeOfRecord; i++ {
-		recordData := recordsData[i*sizeOfRecord : (i+1)*sizeOfRecord]
-		records = append(records, deserializeRecord(&openDatabse, recordData, tableScheme))
+		if checkBitFromData(bitmapData, i) {
+			recordData := recordsData[i*sizeOfRecord : (i+1)*sizeOfRecord]
+			records = append(records, deserializeRecord(&openDatabse, recordData, tableScheme))
+		}
 	}
 
 	return records
+}
+
+func deleteRecord(db database, tableID string, recordIndex int) error {
+	openDatabse := getOpenDB(db)
+	defer closeOpenDB(&openDatabse)
+
+	tablePointer, err := findTable(&openDatabse, tableID)
+	check(err)
+	headers := parseTableHeaders(&openDatabse, *tablePointer)
+
+	if !checkBit(&openDatabse, headers.bitmap.pointer, recordIndex) {
+		return &RecordNotFoundError{}
+	}
+	writeBitToBitmap(&openDatabse, headers.bitmap.location, uint32(recordIndex), 0)
+	return nil
 }

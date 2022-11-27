@@ -25,3 +25,7 @@ func AddRecordToTable(db database, tableID string, record Record) {
 func ReadAllRecords(db database, tableID string) []Record {
 	return readAllRecords(db, tableID)
 }
+
+func DeleteRecord(db database, tableID string, recordIndex int) error {
+	return deleteRecord(db, tableID, recordIndex)
+}
