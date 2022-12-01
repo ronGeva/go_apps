@@ -13,6 +13,11 @@ const (
 	FieldTypeBlob
 )
 
+var FIELD_TYPE_SERIALIZATION = map[FieldType]func([]byte) Field{
+	FieldTypeInt:  deserializeIntField,
+	FieldTypeBlob: deserializeBlobField,
+}
+
 type Field interface {
 	getType() FieldType
 	serialize() []byte
@@ -33,7 +38,7 @@ func (field IntField) serialize() []byte {
 	return res
 }
 
-func deserializeIntField(data []byte) IntField {
+func deserializeIntField(data []byte) Field {
 	assert(len(data) == 4, "An invalid data length was given: "+string(len(data)))
 
 	return IntField{int(binary.LittleEndian.Uint32(data))}
@@ -51,6 +56,6 @@ func (field BlobField) serialize() []byte {
 	return field.Data
 }
 
-func deserializeBlobField(data []byte) BlobField {
+func deserializeBlobField(data []byte) Field {
 	return BlobField{Data: data}
 }

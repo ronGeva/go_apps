@@ -48,12 +48,8 @@ func deserializeRecord(db *openDB, recordData []byte, tableScheme tableScheme) R
 		currPointerData := recordData[i*int(DB_POINTER_SIZE) : int((i+1))*int(DB_POINTER_SIZE)]
 		currPointer := deserializeDbPointer(currPointerData)
 		currData := readAllDataFromDbPointer(db, currPointer)
-		switch tableScheme.columns[i].columnType {
-		case FieldTypeInt:
-			fields = append(fields, deserializeIntField(currData))
-		case FieldTypeBlob:
-			fields = append(fields, deserializeBlobField(currData))
-		}
+		deserializationFunc := FIELD_TYPE_SERIALIZATION[tableScheme.columns[i].columnType]
+		fields = append(fields, deserializationFunc(currData))
 	}
 	return Record{fields: fields}
 }
