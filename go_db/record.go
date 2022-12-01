@@ -24,8 +24,8 @@ func serializeRecord(openDatabse *openDB, record Record) []byte {
 			recordData = append(recordData, fieldData...)
 		} else {
 			pointer := allocateNewDataBlock(openDatabse)
-			writeToDataBlock(openDatabse, pointer, recordData, 0)
-			pointer.size = uint32(len(recordData))
+			appendDataToDataBlockImmutablePointer(openDatabse, fieldData, pointer)
+			pointer.size = uint32(len(fieldData))
 			recordData = append(recordData, serializeDbPointer(pointer)...)
 		}
 	}
@@ -51,6 +51,8 @@ func deserializeRecord(db *openDB, recordData []byte, tableScheme tableScheme) R
 		switch tableScheme.columns[i].columnType {
 		case FieldTypeInt:
 			fields = append(fields, deserializeIntField(currData))
+		case FieldTypeBlob:
+			fields = append(fields, deserializeBlobField(currData))
 		}
 	}
 	return Record{fields: fields}

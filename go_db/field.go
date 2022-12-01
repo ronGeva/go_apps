@@ -38,3 +38,19 @@ func deserializeIntField(data []byte) IntField {
 
 	return IntField{int(binary.LittleEndian.Uint32(data))}
 }
+
+type BlobField struct {
+	Data []byte
+}
+
+func (field BlobField) getType() FieldType {
+	return FieldTypeBlob
+}
+
+func (field BlobField) serialize() []byte {
+	return field.Data
+}
+
+func deserializeBlobField(data []byte) BlobField {
+	return BlobField{Data: data}
+}

@@ -62,6 +62,17 @@ func readFromDB(db *openDB, size uint32, offset uint32) []byte {
 	return readFromFile(db.f, size, offset)
 }
 
+func writeToFile(f *os.File, data []byte, offset uint32) {
+	f.Seek(int64(offset), 0)
+	sizeWritten, err := f.Write(data)
+	check(err)
+	assert(sizeWritten == len(data), "Failed to write the size requested from the db file")
+}
+
+func writeToDB(db *openDB, data []byte, offset uint32) {
+	writeToFile(db.f, data, offset)
+}
+
 func serializeVariableSizeData(data []byte) []byte {
 	res := make([]byte, len(data)+4)
 	binary.LittleEndian.PutUint32(res[:4], uint32(len(data)))
@@ -162,6 +173,44 @@ func getMutableDbPointer(db *openDB, pointerOffset uint32) mutableDbPointer {
 	return mutableDbPointer{pointer: pointer, location: int64(pointerOffset)}
 }
 
+func getPointerFinalBlockOffset(db *openDB, pointer dbPointer, offset *uint32) uint32 {
+	currentBlockOffset := pointer.offset
+	for *offset > db.header.dataBlockSize {
+		_, currentBlockOffset = readDataBlock(db, currentBlockOffset)
+		*offset -= db.header.dataBlockSize
+	}
+	return currentBlockOffset
+}
+
+// Appends the data to the data block without changing the pointer
+// Can be used when another component is responsible for changing the pointer's
+// value, such as when the pointer is only in memory and isn't present on disk.
+func appendDataToDataBlockImmutablePointer(db *openDB, newData []byte, pointer dbPointer) int64 {
+	offset := pointer.size
+	finalBlockOffset := getPointerFinalBlockOffset(db, pointer, &offset)
+	bytesWritten := 0
+	bytesToWrite := min(int(db.header.dataBlockSize-offset-4), len(newData))
+	writeToDB(db, newData[bytesWritten:bytesWritten+int(bytesToWrite)], finalBlockOffset+offset)
+	bytesWritten += int(bytesToWrite)
+	for bytesWritten < len(newData) {
+		// Allocate a new block
+		newBlockPointer := allocateNewDataBlock(db)
+		// Write its offset to the end of the current block
+		writeToDB(db, uint32ToBytes(newBlockPointer.offset), finalBlockOffset+db.header.dataBlockSize-4)
+		// Advance to this new block and continue writing
+		finalBlockOffset = newBlockPointer.offset
+		bytesToWrite = min(int(db.header.dataBlockSize-4), len(newData)-bytesWritten)
+		writeToDB(db, newData[bytesWritten:bytesWritten+bytesToWrite], finalBlockOffset)
+		bytesWritten += bytesToWrite
+	}
+
+	finalOffset, err := db.f.Seek(0, io.SeekCurrent)
+	if err != nil {
+		panic(err)
+	}
+	return finalOffset
+}
+
 // pointerOffset is the offset of the data block pointer in the file
 // returns the absolute offset in the file in which the write has ended.
 func appendDataToDataBlock(db *openDB, newData []byte, pointerOffset uint32) int64 {
@@ -179,16 +228,7 @@ func appendDataToDataBlock(db *openDB, newData []byte, pointerOffset uint32) int
 	db.f.Seek(int64(pointerOffset)+4, 0) // go the location of the pointer's size
 	db.f.Write(newSizeData)
 
-	// Write new data to data block
-	// TODO: allow extending to new data blocks if necessary
-	// (currently a bug will occur when the data block reaches its maximal block size)
-	db.f.Seek(int64(previousPointer.offset)+int64(previousPointer.size), 0)
-	db.f.Write(newData)
-	finalOffset, err := db.f.Seek(0, io.SeekCurrent)
-	if err != nil {
-		panic(err)
-	}
-	return finalOffset
+	return appendDataToDataBlockImmutablePointer(db, newData, previousPointer)
 }
 
 func min(a int, b int) int {
@@ -200,11 +240,7 @@ func min(a int, b int) int {
 
 func writeToDataBlock(db *openDB, pointer dbPointer, data []byte, offset uint32) {
 	assert(offset+uint32(len(data)) <= pointer.size, "Cannot write passed end of data block")
-	currentBlockOffset := pointer.offset
-	for offset > db.header.dataBlockSize {
-		_, currentBlockOffset = readDataBlock(db, currentBlockOffset)
-		offset -= db.header.dataBlockSize
-	}
+	currentBlockOffset := getPointerFinalBlockOffset(db, pointer, &offset)
 	offsetInWriteBuffer := 0
 	for offsetInWriteBuffer < len(data) {
 		db.f.Seek(int64(currentBlockOffset)+int64(offset), 0)
