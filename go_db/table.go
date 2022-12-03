@@ -106,11 +106,6 @@ func writeNewTable(db database, tableID string, scheme tableScheme) {
 	writeNewTableLocalFile(db, tableID, scheme)
 }
 
-// For testing
-func WriteNewTable(db database, tableID string, scheme tableScheme) {
-	writeNewTable(db, tableID, scheme)
-}
-
 func findTable(openDatabse *openDB, tableID string) (*dbPointer, error) {
 	tablesPointer := getDbPointer(openDatabse, TABLES_POINTER_OFFSET)
 	tablesArrayBytes := readAllDataFromDbPointer(openDatabse, tablesPointer)

@@ -3,7 +3,10 @@ This module contains logic related to a single field of a record.
 */
 package go_db
 
-import "encoding/binary"
+import (
+	"encoding/binary"
+	"strconv"
+)
 
 type FieldType int8
 
@@ -39,7 +42,7 @@ func (field IntField) serialize() []byte {
 }
 
 func deserializeIntField(data []byte) Field {
-	assert(len(data) == 4, "An invalid data length was given: "+string(len(data)))
+	assert(len(data) == 4, "An invalid data length was given: "+strconv.Itoa((len(data))))
 
 	return IntField{int(binary.LittleEndian.Uint32(data))}
 }

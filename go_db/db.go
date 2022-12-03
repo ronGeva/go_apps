@@ -98,9 +98,10 @@ func deserializeDbHeader(data []byte) dbHeader {
 }
 
 // TODO: make private in the future
-func InitializeDB(path string) {
+func initializeDB(path string) {
 	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0)
-	defer f.Close()
+	// this is a bug workaround, file is always created as read-only, change it to read-write
+	defer closeDBFile(f, 0600)
 	check(err)
 
 	// Note that a few data blocks must be reserved for the header, bitmap, and the tables array

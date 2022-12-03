@@ -4,6 +4,8 @@ A record represents a single "row" of a relational DB table.
 */
 package go_db
 
+import "strconv"
+
 type Record struct {
 	fields []Field
 }
@@ -41,7 +43,7 @@ func deserializeRecord(db *openDB, recordData []byte, tableScheme tableScheme) R
 	columnsInData := len(recordData) / int(DB_POINTER_SIZE)
 	assert(columnsInData == len(tableScheme.columns),
 		"mismatching column amount between table scheme and data given: "+
-			string(columnsInData)+", "+string(len(tableScheme.columns)))
+			strconv.Itoa(columnsInData)+", "+strconv.Itoa(len(tableScheme.columns)))
 
 	fields := make([]Field, 0)
 	for i := 0; i < columnsInData; i++ {

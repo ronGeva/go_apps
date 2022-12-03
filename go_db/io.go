@@ -254,3 +254,8 @@ func writeToDataBlock(db *openDB, pointer dbPointer, data []byte, offset uint32)
 		_, currentBlockOffset = readDataBlock(db, currentBlockOffset)
 	}
 }
+
+func closeDBFile(f *os.File, newMode int) {
+	f.Close()
+	os.Chmod(f.Name(), os.FileMode(newMode))
+}

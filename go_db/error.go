@@ -1,5 +1,7 @@
 package go_db
 
+import "strconv"
+
 type UnsupportedError struct {
 }
 
@@ -41,8 +43,8 @@ type InsufficientWriteError struct {
 }
 
 func (err *InsufficientWriteError) Error() string {
-	return "Write error, expected to write " + string(err.expectedSize) +
-		" bytes, instead only written " + string(err.actualSize)
+	return "Write error, expected to write " + strconv.FormatUint(uint64(err.expectedSize), 10) +
+		" bytes, instead only written " + strconv.FormatUint(uint64(err.actualSize), 10)
 }
 
 func check(err error) {
