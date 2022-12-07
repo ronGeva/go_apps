@@ -208,3 +208,56 @@ func deleteRecord(db database, tableID string, recordIndex int) error {
 	writeBitToBitmap(&openDatabse, headers.bitmap.location, uint32(recordIndex), 0)
 	return nil
 }
+
+func validateConditions(scheme tableScheme, recordsCondition conditionNode) bool {
+	if recordsCondition.condition != nil {
+		if recordsCondition.left != nil || recordsCondition.right != nil ||
+			recordsCondition.operator != ConditionOperatorNull {
+			return false
+		}
+		cond := recordsCondition.condition
+		if int(cond.fieldIndex) >= len(scheme.columns) {
+			return false
+		}
+		if !isConditionSupported(scheme, cond) {
+			return false
+		}
+		return true
+	} else {
+		result := true
+		if recordsCondition.left != nil {
+			result = result && validateConditions(scheme, *recordsCondition.left)
+		}
+		if recordsCondition.right != nil {
+			result = result && validateConditions(scheme, *recordsCondition.right)
+		}
+		return result
+	}
+}
+
+func filterRecordsFromTable(db database, tableID string, recordsCondition conditionNode) []Record {
+	openDatabase := getOpenDB(db)
+	defer closeOpenDB(&openDatabase)
+
+	tablePointer, err := findTable(&openDatabase, tableID)
+	check(err)
+	headers := parseTableHeaders(&openDatabase, *tablePointer)
+	assert(validateConditions(headers.scheme, recordsCondition), "invalid condition")
+
+	bitmapData := readAllDataFromDbPointer(&openDatabase, headers.bitmap.pointer)
+	scheme := headers.scheme
+	recordsPointer := headers.records
+	records := make([]Record, 0)
+	sizeOfRecord := int(DB_POINTER_SIZE) * len(headers.scheme.columns)
+	for i := 0; i < int(recordsPointer.pointer.size)/sizeOfRecord; i++ {
+		if checkBitFromData(bitmapData, i) {
+			recordData := readFromDbPointer(&openDatabase, recordsPointer.pointer, uint32(sizeOfRecord),
+				uint32(sizeOfRecord*i))
+			record := deserializeRecord(&openDatabase, recordData, scheme)
+			if checkAllConditions(recordsCondition, record) {
+				records = append(records, record)
+			}
+		}
+	}
+	return records
+}

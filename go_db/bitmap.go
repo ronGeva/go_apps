@@ -10,7 +10,7 @@ func checkBit(db *openDB, bitmap dbPointer, index int) bool {
 	}
 	// TODO: use offset once it is implemented in readFromDbPointer
 	containingByte := uint32(index / 8)
-	data := readFromDbPointer(db, bitmap, containingByte+1)
+	data := readFromDbPointer(db, bitmap, containingByte+1, 0)
 	return checkBitFromData(data, index)
 }
 
