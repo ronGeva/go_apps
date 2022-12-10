@@ -2,6 +2,7 @@ package go_db
 
 import (
 	"encoding/binary"
+	"strings"
 )
 
 type columndHeader struct {
@@ -113,7 +114,7 @@ func findTable(openDatabse *openDB, tableID string) (*dbPointer, error) {
 		currPointer := deserializeDbPointer(
 			tablesArrayBytes[i*int(DB_POINTER_SIZE) : (i+1)*int(DB_POINTER_SIZE)])
 		uniqueID := readVariableSizeDataFromDB(openDatabse, currPointer.offset)
-		if string(uniqueID) == tableID {
+		if strings.EqualFold(string(uniqueID), tableID) {
 			return &currPointer, nil
 		}
 	}

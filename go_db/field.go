@@ -21,6 +21,10 @@ var FIELD_TYPE_SERIALIZATION = map[FieldType]func([]byte) Field{
 	FieldTypeBlob: deserializeBlobField,
 }
 
+var FIELD_TYPE_QUERY_VALUE_PARSE = map[FieldType]func(string) ([]byte, error){
+	FieldTypeInt: intQueryValueParse,
+}
+
 type Field interface {
 	getType() FieldType
 	serialize() []byte
@@ -45,6 +49,14 @@ func deserializeIntField(data []byte) Field {
 	assert(len(data) == 4, "An invalid data length was given: "+strconv.Itoa((len(data))))
 
 	return IntField{int(binary.LittleEndian.Uint32(data))}
+}
+
+func intQueryValueParse(data string) ([]byte, error) {
+	num, err := strconv.Atoi(data)
+	if err != nil {
+		return nil, err
+	}
+	return uint32ToBytes(uint32(num)), nil
 }
 
 type BlobField struct {

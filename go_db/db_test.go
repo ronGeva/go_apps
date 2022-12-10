@@ -112,3 +112,13 @@ func TestRecordFilter(t *testing.T) {
 		t.Fail()
 	}
 }
+
+func TestParseSelectQuery(t *testing.T) {
+	db, _ := buildTable2()
+	openDB := getOpenDB(db)
+	defer closeOpenDB(&openDB)
+
+	//sql := "select * from table1\r\n where\t columnA = 5   \r\n "
+	sql := "Select columnA, columnB from newTable where ((columnA = 5) and (columnB = 13)) or ((columnA = 7) and (not (columnB = 30)))"
+	parseSelectQuery(&openDB, sql)
+}
