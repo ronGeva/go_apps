@@ -2,7 +2,6 @@ package go_db
 
 import (
 	"fmt"
-	"sort"
 	"strings"
 )
 
@@ -19,16 +18,32 @@ type selectQuery struct {
 	condition conditionNode
 }
 
+type parenthesesInterval struct {
+	start       int
+	end         int
+	parentheses bool
+}
+
 type conditionInterval struct {
-	start    uint32
-	end      uint32
-	operator string
+	start int
+	end   int
 }
 
 type conditionStrings struct {
 	firstOperand  string
 	secondOperand string
 	operator      string
+}
+
+type OperatorDescriptor struct {
+	str      string
+	operator conditionOperator
+}
+
+var LOGICAL_OPREATORS = []OperatorDescriptor{
+	{"or", ConditionOperatorOr},
+	{"and", ConditionOperatorAnd},
+	{"not", ConditionOperatorNot},
 }
 
 var CONDITION_OPERATORS = map[string]conditionType{
@@ -124,7 +139,7 @@ func columnNamesToColumnIndexes(scheme tableScheme, nameToIndex map[string]uint3
 	return columnIndexes, nil
 }
 
-func parseCondition(condStrings conditionStrings, scheme tableScheme,
+func parseSingleConditionInternal(condStrings conditionStrings, scheme tableScheme,
 	nameToIndex map[string]uint32) (*condition, error) {
 	// We currently assume the first operand always refer to a column name while the
 	// second operand always refer to a value
@@ -148,102 +163,209 @@ func parseCondition(condStrings conditionStrings, scheme tableScheme,
 	return &cond, nil
 }
 
-func parseConditionString(whereStatement string, condInterval conditionInterval,
-	scheme tableScheme, nameToIndex map[string]uint32) (*condition, error) {
-	conditionString := whereStatement[condInterval.start : condInterval.end+1]
-
-	// Remove parentheses
-	if len(conditionString) < 2 {
-		return nil, fmt.Errorf("invalid condition %s", conditionString)
-	}
-	conditionString = conditionString[1 : len(conditionString)-1]
-
-	operatorIndex := strings.Index(conditionString, condInterval.operator)
-	if operatorIndex == -1 {
-		return nil, fmt.Errorf("failed to find operator %s in condition %s",
-			condInterval.operator, conditionString)
-	}
-	firstOperand := conditionString[:operatorIndex]
-	secondOperand := conditionString[operatorIndex+1:]
-	firstOperand = removeWhitespaces(firstOperand)
-	secondOperand = removeWhitespaces(secondOperand)
-	return parseCondition(conditionStrings{firstOperand: firstOperand, secondOperand: secondOperand,
-		operator: condInterval.operator}, scheme, nameToIndex)
-}
-
-func getConditionInterval(conditionString string, index uint32, operator string) (*conditionInterval, error) {
-	start := -1
-	for i := int(index) - 1; i >= 0; i-- {
-		if conditionString[i] == '(' {
-			start = i
+func findMatchingClosingParentheses(sql string, i int, end int) (int, uint32) {
+	count := 1
+	i++
+	for i < end && count > 0 {
+		if sql[i] == '(' {
+			count++
+		}
+		if sql[i] == ')' {
+			count--
+		}
+		if count == 0 {
 			break
 		}
+		i++
 	}
-	endOffset := strings.Index(conditionString[index+1:], ")")
-	if start == -1 || endOffset == -1 {
-		return nil, fmt.Errorf("failed to find matching parentheses around condition in index %d",
-			index)
-	}
-	end := uint32(endOffset) + 1 + index
-	return &conditionInterval{start: uint32(start), end: end, operator: operator}, nil
+	return i, uint32(count)
 }
 
-func doIntervalsOverlap(intervals []conditionInterval) bool {
-	intervalsStartComparison := func(i, j int) bool {
-		return intervals[i].start < intervals[j].start
-	}
+func divideStatementByParentheses(sql string, start int, end int) ([]parenthesesInterval, error) {
+	intervals := []parenthesesInterval{}
+	currentInterval := parenthesesInterval{start: start, parentheses: false}
+	count := uint32(0)
 
-	sort.SliceStable(intervals, intervalsStartComparison)
-	for i := 0; i < len(intervals)-1; i++ {
-		if intervals[i].end >= intervals[i+1].start {
-			return true
+	for i := start; i < end; i++ {
+		if sql[i] == '(' {
+			// Handle the edge case where the statement begins with '('
+			if i > start {
+				currentInterval.end = i - 1
+				intervals = append(intervals, currentInterval)
+			}
+			currentInterval = parenthesesInterval{start: i + 1, parentheses: true}
+
+			i, count = findMatchingClosingParentheses(sql, i, end)
+
+			if count != 0 {
+				return nil, fmt.Errorf("invalid parentheses")
+			}
+			currentInterval.end = i
+			intervals = append(intervals, currentInterval)
+			currentInterval = parenthesesInterval{start: i + 1, parentheses: false}
 		}
 	}
-	return false
+	currentInterval.end = end
+	if currentInterval.start < currentInterval.end {
+		intervals = append(intervals, currentInterval)
+	}
+
+	return intervals, nil
 }
 
-func parseSelectWhere(sql string, nameToIndex map[string]uint32, scheme tableScheme) {
+func parseSingleCondition(sql string, scheme tableScheme, nameToIndex map[string]uint32,
+	start int, end int) (*conditionNode, error) {
+	for i := start; i < end; i++ {
+		for operator := range CONDITION_OPERATORS {
+			if sql[i:i+len(operator)] == operator {
+				firstOperand := removeWhitespaces(sql[start:i])
+				secondOperand := removeWhitespaces(sql[i+len(operator) : end])
+				condStrings := conditionStrings{firstOperand: firstOperand,
+					secondOperand: secondOperand, operator: operator}
+				cond, err := parseSingleConditionInternal(condStrings, scheme, nameToIndex)
+				if err != nil {
+					return nil, err
+				}
+				return &conditionNode{condition: cond}, nil
+			}
+		}
+	}
+	return nil, fmt.Errorf("failed to parse single condition %s", sql[start:end])
+}
+
+func divideStatementByOperator(sql string, paranthesesIntervals []parenthesesInterval, operator string,
+	start int, end int) ([]conditionInterval, error) {
+	intervals := make([]conditionInterval, 0)
+	currInterval := conditionInterval{start: start}
+	for _, interval := range paranthesesIntervals {
+		if interval.end <= start || interval.start > end || interval.parentheses {
+			continue
+		}
+		for i := max(int(interval.start), start); i < min(int(interval.end), end)-len(operator)+1; i++ {
+			if sql[i:i+len(operator)] == operator {
+				currInterval.end = i
+				intervals = append(intervals, currInterval)
+				currInterval = conditionInterval{start: i + len(operator)}
+			}
+		}
+	}
+	currInterval.end = end
+	if currInterval.start < currInterval.end {
+		intervals = append(intervals, currInterval)
+	}
+	return intervals, nil
+}
+
+func parseConditionByOperator(sql string, nameToIndex map[string]uint32, scheme tableScheme,
+	parenthesesIntervals []parenthesesInterval, operatorIndex int, start int, end int) (*conditionNode, error) {
+
+	// divide by or operators
+	operatorSeparatedIntervals, err := divideStatementByOperator(sql, parenthesesIntervals,
+		LOGICAL_OPREATORS[operatorIndex].str, start, end)
+	if err != nil {
+		return nil, err
+	}
+
+	node := conditionNode{operator: LOGICAL_OPREATORS[operatorIndex].operator}
+	subnodes := make([]*conditionNode, 0)
+	nextOperatorIndex := operatorIndex + 1
+	for _, interval := range operatorSeparatedIntervals {
+		var node *conditionNode
+		var err error
+		if nextOperatorIndex < len(LOGICAL_OPREATORS) {
+			node, err = parseConditionByOperator(sql, nameToIndex, scheme, parenthesesIntervals, nextOperatorIndex,
+				int(interval.start), int(interval.end))
+		} else {
+			node, err = parseCondition(sql, nameToIndex, scheme, int(interval.start), int(interval.end))
+		}
+		if err != nil {
+			return nil, err
+		}
+		// Handle empty conditions
+		if node != nil {
+			subnodes = append(subnodes, node)
+		}
+	}
+
+	if len(subnodes) == 0 {
+		return nil, fmt.Errorf("failed to parse condition %s", sql[start:end])
+	}
+	if len(operatorSeparatedIntervals) == 1 {
+		return subnodes[0], nil
+	}
+
+	node.operands = subnodes
+	return &node, nil
+}
+
+func isAtomicCondition(sql string, start int, end int) bool {
+	for _, operator := range LOGICAL_OPREATORS {
+		for i := start; i < end-len(operator.str)+1; i++ {
+			if sql[i:i+len(operator.str)] == operator.str {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func parseCondition(sql string, nameToIndex map[string]uint32, scheme tableScheme,
+	start int, end int) (*conditionNode, error) {
+	// ignore surronding whitespaces
+	for isWhitespace(rune(sql[start])) {
+		start++
+	}
+	for isWhitespace(rune(sql[end-1])) {
+		end--
+	}
+
+	if start >= end {
+		// This is not an error, merely an empty condition
+		return nil, nil
+	}
+
+	var node *conditionNode
+	var err error
+	// Find all substrings held together by parentheses
+	parenthesesIntervals, err := divideStatementByParentheses(sql, start, end)
+	if err != nil {
+		return nil, err
+	}
+
+	if len(parenthesesIntervals) == 1 && parenthesesIntervals[0].parentheses {
+		node, err = parseCondition(sql, nameToIndex, scheme,
+			parenthesesIntervals[0].start, parenthesesIntervals[0].end)
+	} else {
+		if len(parenthesesIntervals) == 1 && isAtomicCondition(sql, parenthesesIntervals[0].start,
+			parenthesesIntervals[0].end) {
+			node, err = parseSingleCondition(sql, scheme, nameToIndex,
+				parenthesesIntervals[0].start, parenthesesIntervals[0].end)
+		} else {
+			node, err = parseConditionByOperator(sql, nameToIndex, scheme, parenthesesIntervals, 0,
+				start, end)
+		}
+	}
+
+	if err != nil {
+		return nil, err
+	}
+	return node, nil
+}
+
+func parseSelectWhere(sql string, nameToIndex map[string]uint32,
+	scheme tableScheme) (*conditionNode, error) {
 	whereIndex := strings.Index(sql, "where")
 	if whereIndex == -1 {
-		return
+		return nil, nil
 	}
 
 	// TODO: handle queries with something after the condition
 	whereStatement := sql[whereIndex+len("where"):]
-
-	// Find all the conditions in the "where" statement
-	conditionOperatorIndexes := map[uint32]string{}
-	for operator := range CONDITION_OPERATORS {
-		for i := 0; i < len(whereStatement); i++ {
-			if whereStatement[i:i+len(operator)] == operator {
-				conditionOperatorIndexes[uint32(i)] = operator
-			}
-		}
+	node, err := parseCondition(whereStatement, nameToIndex, scheme, 0, len(whereStatement))
+	if err != nil {
+		return nil, err
 	}
-	conditionRanges := make([]conditionInterval, 0)
-	for index, operator := range conditionOperatorIndexes {
-		interval, err := getConditionInterval(whereStatement, index, operator)
-		if err != nil {
-			return
-		}
-		conditionRanges = append(conditionRanges, *interval)
-	}
-
-	// Make sure the condition ranges do not overlap
-	if doIntervalsOverlap(conditionRanges) {
-		return
-	}
-
-	parsedConditions := make([]condition, len(conditionRanges))
-	for i := 0; i < len(conditionRanges); i++ {
-		parsedCondition, err := parseConditionString(whereStatement, conditionRanges[i],
-			scheme, nameToIndex)
-		if err != nil {
-			return
-		}
-		parsedConditions[i] = *parsedCondition
-	}
-	return
+	return node, nil
 }
 
 func parseSelectQuery(db *openDB, sql string) (*selectQuery, error) {
@@ -264,8 +386,10 @@ func parseSelectQuery(db *openDB, sql string) (*selectQuery, error) {
 	if err != nil {
 		return nil, err
 	}
-	parseSelectWhere(sql, nameToIndex, tableHeaders.scheme)
-	condition := conditionNode{}
+	cond, err := parseSelectWhere(sql, nameToIndex, tableHeaders.scheme)
+	if err != nil {
+		return nil, err
+	}
 
-	return &selectQuery{columns: columnIndexes, tableID: tableID, condition: condition}, nil
+	return &selectQuery{columns: columnIndexes, tableID: tableID, condition: *cond}, nil
 }

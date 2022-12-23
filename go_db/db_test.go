@@ -1,6 +1,7 @@
 package go_db
 
 import (
+	"fmt"
 	"os"
 	"testing"
 )
@@ -112,12 +113,60 @@ func TestRecordFilter(t *testing.T) {
 	}
 }
 
-func TestParseSelectQuery(t *testing.T) {
+func printConditionNode(node conditionNode, indent int) {
+	indentString := ""
+	for i := 0; i < indent; i++ {
+		indentString += " "
+	}
+	if node.operator != ConditionOperatorNull {
+		fmt.Println(indentString+"operator=", node.operator)
+		for i := 0; i < len(node.operands); i++ {
+			printConditionNode(*node.operands[i], indent+2)
+		}
+	} else {
+		fmt.Println(indentString+"condition=",
+			node.condition.fieldIndex, node.condition.conditionType)
+	}
+}
+
+func TestParseSelectQuery1(t *testing.T) {
 	db, _ := buildTable2()
 	openDB := getOpenDB(db)
 	defer closeOpenDB(&openDB)
 
 	//sql := "select * from table1\r\n where\t columnA = 5   \r\n "
 	sql := "Select columnA, columnB from newTable where ((columnA = 5) and (columnB = 13)) or ((columnA = 7) and (not (columnB = 30)))"
-	parseSelectQuery(&openDB, sql)
+	query, err := parseSelectQuery(&openDB, sql)
+	if err != nil {
+		t.Fail()
+	}
+	printConditionNode(query.condition, 0)
+}
+
+func TestParseSelectQuery2(t *testing.T) {
+	db, _ := buildTable2()
+	openDB := getOpenDB(db)
+	defer closeOpenDB(&openDB)
+
+	sql := "Select columnA, columnB from newTable where columnA = 7 and columnb = 13 or columna = 5 and columna = 10 and not columnb = 5"
+	query, err := parseSelectQuery(&openDB, sql)
+	if err != nil {
+		t.Fail()
+	}
+	printConditionNode(query.condition, 0)
+}
+
+func TestDivideStatementByParentheses(t *testing.T) {
+	sql := "((columnA = 5) and (columnB = 13)) or columnA = 15 and columnB = 37 or ((columnA = 7) and (not (columnB = 30)))"
+	indexes, err := divideStatementByParentheses(sql, 0, len(sql))
+	if err != nil {
+		t.Fail()
+	}
+
+	if len(indexes) != 3 {
+		t.Fail()
+	}
+	assert(indexes[0].parentheses, "Wrong first interval")
+	assert(!indexes[1].parentheses, "Wrong second interval")
+	assert(indexes[2].parentheses, "Wrong third interval")
 }

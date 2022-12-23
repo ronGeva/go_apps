@@ -244,6 +244,13 @@ func min(a int, b int) int {
 	return a
 }
 
+func max(a int, b int) int {
+	if a < b {
+		return b
+	}
+	return a
+}
+
 func writeToDataBlock(db *openDB, pointer dbPointer, data []byte, offset uint32) {
 	assert(offset+uint32(len(data)) <= pointer.size, "Cannot write passed end of data block")
 	currentBlockOffset := getPointerFinalBlockOffset(db, pointer, &offset)

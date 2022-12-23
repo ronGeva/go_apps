@@ -63,7 +63,6 @@ func isConditionSupported(scheme tableScheme, cond *condition) bool {
 }
 
 func andFunc(values []bool) bool {
-	assert(len(values) >= 2, "and operator requires two or more operands")
 	res := true
 	for _, val := range values {
 		res = res && val
@@ -72,7 +71,6 @@ func andFunc(values []bool) bool {
 }
 
 func orFunc(values []bool) bool {
-	assert(len(values) >= 2, "or operator requires two or more operands")
 	res := false
 	for _, val := range values {
 		res = res || val
