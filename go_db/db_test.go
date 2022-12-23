@@ -78,8 +78,7 @@ func TestConditions(t *testing.T) {
 		t.Fail()
 	}
 	node3 := conditionNode{}
-	node3.left = &node1
-	node3.right = &node2
+	node3.operands = []*conditionNode{&node1, &node2}
 	node3.operator = ConditionOperatorOr
 	// Condition should succeed
 	if !checkAllConditions(node3, record) {
@@ -91,21 +90,21 @@ func TestConditions(t *testing.T) {
 		t.Fail()
 	}
 	node5 := conditionNode{}
-	node5.left = &node4
+	node5.operands = []*conditionNode{&node4}
 	node5.operator = ConditionOperatorNot
 	if checkAllConditions(node5, record) {
 		t.Fail()
 	}
 }
 
-func buildConditionTree() conditionNode {
+func buildConditionTreeForTest() conditionNode {
 	node1 := conditionNode{condition: &condition{0, ConditionTypeEqual, uint32ToBytes(5)}}
 	node2 := conditionNode{condition: &condition{1, ConditionTypeEqual, uint32ToBytes(11)}}
-	return conditionNode{operator: ConditionOperatorAnd, left: &node1, right: &node2}
+	return conditionNode{operator: ConditionOperatorAnd, operands: []*conditionNode{&node1, &node2}}
 }
 
 func TestRecordFilter(t *testing.T) {
-	cond := buildConditionTree()
+	cond := buildConditionTreeForTest()
 	db, tableID := buildTable2()
 	records := filterRecordsFromTable(db, tableID, cond)
 	if len(records) != 1 {

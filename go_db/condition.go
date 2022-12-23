@@ -23,11 +23,6 @@ const (
 	ConditionOperatorNot
 )
 
-type optionalBool struct {
-	value   bool
-	isValid bool
-}
-
 type condition struct {
 	fieldIndex     uint32
 	conditionType  conditionType
@@ -36,8 +31,7 @@ type condition struct {
 
 type conditionNode struct {
 	operator  conditionOperator
-	left      *conditionNode
-	right     *conditionNode
+	operands  []*conditionNode
 	condition *condition
 }
 
@@ -46,7 +40,7 @@ var SUPPORTED_CONDITIONS = map[FieldType][]conditionType{
 	FieldTypeBlob: {ConditionTypeEqual},
 }
 
-var OPEATOR_FUNCS = map[conditionOperator]func(left optionalBool, right optionalBool) bool{
+var OPEATOR_FUNCS = map[conditionOperator]func(values []bool) bool{
 	ConditionOperatorAnd: andFunc,
 	ConditionOperatorOr:  orFunc,
 	ConditionOperatorNot: notFunc,
@@ -68,19 +62,27 @@ func isConditionSupported(scheme tableScheme, cond *condition) bool {
 	return false
 }
 
-func andFunc(left optionalBool, right optionalBool) bool {
-	assert(left.isValid && right.isValid, "and operator requires two operands")
-	return left.value && right.value
+func andFunc(values []bool) bool {
+	assert(len(values) >= 2, "and operator requires two or more operands")
+	res := true
+	for _, val := range values {
+		res = res && val
+	}
+	return res
 }
 
-func orFunc(left optionalBool, right optionalBool) bool {
-	assert(left.isValid && right.isValid, "or operator requires two operands")
-	return left.value || right.value
+func orFunc(values []bool) bool {
+	assert(len(values) >= 2, "or operator requires two or more operands")
+	res := false
+	for _, val := range values {
+		res = res || val
+	}
+	return res
 }
 
-func notFunc(left optionalBool, right optionalBool) bool {
-	assert(left.isValid && !right.isValid, "not opreator accepts exactly one operands")
-	return !left.value
+func notFunc(values []bool) bool {
+	assert(len(values) == 1, "not opreator accepts exactly one operands")
+	return !values[0]
 }
 
 func checkEqual(f Field, data []byte) (bool, error) {
@@ -129,21 +131,13 @@ func checkCondition(c condition, record Record) bool {
 }
 
 func checkAllConditions(currentNode conditionNode, record Record) bool {
-	var leftResult optionalBool
-	var rightResult optionalBool
-	if currentNode.left == nil && currentNode.right == nil {
-		assert(currentNode.condition != nil, "Node must have either a son or a condition")
+	values := make([]bool, 0)
+	if len(currentNode.operands) == 0 {
 		return checkCondition(*currentNode.condition, record)
 	}
 
-	if currentNode.left != nil {
-		leftResult.value = checkAllConditions(*currentNode.left, record)
-		leftResult.isValid = true
+	for _, operand := range currentNode.operands {
+		values = append(values, checkAllConditions(*operand, record))
 	}
-	if currentNode.right != nil {
-		rightResult.value = checkAllConditions(*currentNode.right, record)
-		rightResult.isValid = true
-	}
-	assert(currentNode.operator != ConditionOperatorNull, "A node with sons must have an operator")
-	return OPEATOR_FUNCS[currentNode.operator](leftResult, rightResult)
+	return OPEATOR_FUNCS[currentNode.operator](values)
 }

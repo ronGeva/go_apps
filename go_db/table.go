@@ -212,10 +212,6 @@ func deleteRecord(db database, tableID string, recordIndex int) error {
 
 func validateConditions(scheme tableScheme, recordsCondition conditionNode) bool {
 	if recordsCondition.condition != nil {
-		if recordsCondition.left != nil || recordsCondition.right != nil ||
-			recordsCondition.operator != ConditionOperatorNull {
-			return false
-		}
 		cond := recordsCondition.condition
 		if int(cond.fieldIndex) >= len(scheme.columns) {
 			return false
@@ -226,11 +222,8 @@ func validateConditions(scheme tableScheme, recordsCondition conditionNode) bool
 		return true
 	} else {
 		result := true
-		if recordsCondition.left != nil {
-			result = result && validateConditions(scheme, *recordsCondition.left)
-		}
-		if recordsCondition.right != nil {
-			result = result && validateConditions(scheme, *recordsCondition.right)
+		for _, operand := range recordsCondition.operands {
+			result = result && validateConditions(scheme, *operand)
 		}
 		return result
 	}
