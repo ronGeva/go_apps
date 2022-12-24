@@ -229,29 +229,33 @@ func validateConditions(scheme tableScheme, recordsCondition conditionNode) bool
 	}
 }
 
-func filterRecordsFromTable(db database, tableID string, recordsCondition conditionNode) []Record {
-	openDatabase := getOpenDB(db)
-	defer closeOpenDB(&openDatabase)
-
-	tablePointer, err := findTable(&openDatabase, tableID)
+func filterRecordsFromTableInternal(openDatabase *openDB, tableID string, recordsCondition conditionNode) []Record {
+	tablePointer, err := findTable(openDatabase, tableID)
 	check(err)
-	headers := parseTableHeaders(&openDatabase, *tablePointer)
+	headers := parseTableHeaders(openDatabase, *tablePointer)
 	assert(validateConditions(headers.scheme, recordsCondition), "invalid condition")
 
-	bitmapData := readAllDataFromDbPointer(&openDatabase, headers.bitmap.pointer)
+	bitmapData := readAllDataFromDbPointer(openDatabase, headers.bitmap.pointer)
 	scheme := headers.scheme
 	recordsPointer := headers.records
 	records := make([]Record, 0)
 	sizeOfRecord := int(DB_POINTER_SIZE) * len(headers.scheme.columns)
 	for i := 0; i < int(recordsPointer.pointer.size)/sizeOfRecord; i++ {
 		if checkBitFromData(bitmapData, i) {
-			recordData := readFromDbPointer(&openDatabase, recordsPointer.pointer, uint32(sizeOfRecord),
+			recordData := readFromDbPointer(openDatabase, recordsPointer.pointer, uint32(sizeOfRecord),
 				uint32(sizeOfRecord*i))
-			record := deserializeRecord(&openDatabase, recordData, scheme)
+			record := deserializeRecord(openDatabase, recordData, scheme)
 			if checkAllConditions(recordsCondition, record) {
 				records = append(records, record)
 			}
 		}
 	}
 	return records
+}
+
+func filterRecordsFromTable(db database, tableID string, recordsCondition conditionNode) []Record {
+	openDatabase := getOpenDB(db)
+	defer closeOpenDB(&openDatabase)
+
+	return filterRecordsFromTableInternal(&openDatabase, tableID, recordsCondition)
 }

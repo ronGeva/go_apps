@@ -136,11 +136,10 @@ func TestParseSelectQuery1(t *testing.T) {
 
 	//sql := "select * from table1\r\n where\t columnA = 5   \r\n "
 	sql := "Select columnA, columnB from newTable where ((columnA = 5) and (columnB = 13)) or ((columnA = 7) and (not (columnB = 30)))"
-	query, err := parseSelectQuery(&openDB, sql)
+	_, err := parseSelectQuery(&openDB, sql)
 	if err != nil {
 		t.Fail()
 	}
-	printConditionNode(query.condition, 0)
 }
 
 func TestParseSelectQuery2(t *testing.T) {
@@ -149,11 +148,10 @@ func TestParseSelectQuery2(t *testing.T) {
 	defer closeOpenDB(&openDB)
 
 	sql := "Select columnA, columnB from newTable where columnA = 7 and columnb = 13 or columna = 5 and columna = 10 and not columnb = 5"
-	query, err := parseSelectQuery(&openDB, sql)
+	_, err := parseSelectQuery(&openDB, sql)
 	if err != nil {
 		t.Fail()
 	}
-	printConditionNode(query.condition, 0)
 }
 
 func TestDivideStatementByParentheses(t *testing.T) {
@@ -169,4 +167,32 @@ func TestDivideStatementByParentheses(t *testing.T) {
 	assert(indexes[0].parentheses, "Wrong first interval")
 	assert(!indexes[1].parentheses, "Wrong second interval")
 	assert(indexes[2].parentheses, "Wrong third interval")
+}
+
+// e2e test made to check whether a simple select query works via the DB's cursor
+func TestCursorSelect1(t *testing.T) {
+	db, _ := buildTable2()
+	dbPath := db.id.identifyingString
+	conn, err := Connect(dbPath)
+	if err != nil {
+		t.Fail()
+	}
+	cursor := conn.OpenCursor()
+	err = cursor.Execute("Select columnA, ColumnB from newTable where columnA = 5")
+	if err != nil {
+		t.Fail()
+	}
+	records := cursor.FetchAll()
+	if len(records) != 1 {
+		t.Fail()
+	}
+	record := records[0]
+	firstField := record.fields[0]
+	intField, ok := firstField.(IntField)
+	if !ok {
+		t.Fail()
+	}
+	if intField.Value != 5 {
+		t.Fail()
+	}
 }

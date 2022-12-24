@@ -5,6 +5,13 @@ import (
 	"strings"
 )
 
+type queryType int8
+
+const (
+	QueryTypeInvalid queryType = iota
+	QueryTypeSelect
+)
+
 type stringSet map[string]interface{}
 type uint32Set map[uint32]interface{}
 
@@ -38,6 +45,10 @@ type conditionStrings struct {
 type OperatorDescriptor struct {
 	str      string
 	operator conditionOperator
+}
+
+var QUERY_TYPE_MAP = map[string]queryType{
+	"select": QueryTypeSelect,
 }
 
 var LOGICAL_OPREATORS = []OperatorDescriptor{
@@ -392,4 +403,13 @@ func parseSelectQuery(db *openDB, sql string) (*selectQuery, error) {
 	}
 
 	return &selectQuery{columns: columnIndexes, tableID: tableID, condition: *cond}, nil
+}
+
+func parseQueryType(sql string) (queryType, error) {
+	sql = strings.ToLower(sql) // normalize query by lowering it
+	words := strings.FieldsFunc(sql, isWhitespace)
+	if len(words) == 0 {
+		return QueryTypeInvalid, fmt.Errorf("empty query")
+	}
+	return QUERY_TYPE_MAP[words[0]], nil
 }
