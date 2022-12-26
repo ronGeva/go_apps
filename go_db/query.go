@@ -2,6 +2,7 @@ package go_db
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 )
 
@@ -10,6 +11,7 @@ type queryType int8
 const (
 	QueryTypeInvalid queryType = iota
 	QueryTypeSelect
+	QueryTypeInsert
 )
 
 type stringSet map[string]interface{}
@@ -22,7 +24,12 @@ type selectQuery struct {
 	// TODO: support JOINs(?)
 	tableID string
 	// The conditions relevant for this query
-	condition conditionNode
+	condition *conditionNode
+}
+
+type insertQuery struct {
+	tableID string
+	records []Record
 }
 
 type parenthesesInterval struct {
@@ -49,6 +56,7 @@ type OperatorDescriptor struct {
 
 var QUERY_TYPE_MAP = map[string]queryType{
 	"select": QueryTypeSelect,
+	"insert": QueryTypeInsert,
 }
 
 var LOGICAL_OPREATORS = []OperatorDescriptor{
@@ -86,10 +94,10 @@ func removeWhitespaces(str string) string {
 	return strings.Map(nullifyWhitespaceCharacter, str)
 }
 
-func tableIDFromQuery(words []string) string {
+func tableIDFromQuery(words []string, wordBefore string) string {
 	tableIDIndex := len(words) // set the index as something illegal
 	for index := range words {
-		if words[index] == "from" {
+		if words[index] == wordBefore {
 			tableIDIndex = index + 1
 			break
 		}
@@ -382,7 +390,7 @@ func parseSelectWhere(sql string, nameToIndex map[string]uint32,
 func parseSelectQuery(db *openDB, sql string) (*selectQuery, error) {
 	sql = strings.ToLower(sql) // normalize query by lowering it
 	words := strings.FieldsFunc(sql, isWhitespace)
-	tableID := tableIDFromQuery(words)
+	tableID := tableIDFromQuery(words, "from")
 	tablePointer, err := findTable(db, tableID)
 	if err != nil {
 		return nil, err
@@ -402,7 +410,99 @@ func parseSelectQuery(db *openDB, sql string) (*selectQuery, error) {
 		return nil, err
 	}
 
-	return &selectQuery{columns: columnIndexes, tableID: tableID, condition: *cond}, nil
+	return &selectQuery{columns: columnIndexes, tableID: tableID, condition: cond}, nil
+}
+
+func parseSingleValuesTuple(statement string, index *int) ([]string, error) {
+	if statement[*index] != '(' {
+		return nil, fmt.Errorf("values tuple should start with '('")
+	}
+	*index++
+	start := *index
+	for ; *index < len(statement); *index++ {
+		if statement[*index] == ')' {
+			break
+		}
+	}
+	if statement[*index] != ')' {
+		return nil, fmt.Errorf("failed to find ')' at the end of values tuple")
+	}
+	valuesString := statement[start:*index]
+	*index++
+	return strings.Split(valuesString, ","), nil
+}
+
+func valuesTupleIntoRecord(values []string, scheme tableScheme) (*Record, error) {
+	if len(values) != len(scheme.columns) {
+		return nil, fmt.Errorf("expected %d values, instead got %d in %s", len(scheme.columns),
+			len(values), strings.Join(values, ","))
+	}
+	fields := make([]Field, 0)
+	for i := range values {
+		field, err := STRING_TO_FIELD_FUNCS[scheme.columns[i].columnType](values[i])
+		if err != nil {
+			return nil, err
+		}
+		fields = append(fields, field)
+	}
+	return &Record{fields: fields}, nil
+}
+
+func findValuesStringInInsertQuery(sql string) (*string, error) {
+	r, err := regexp.Compile("values\\s+(\\(.*\\))")
+	if err != nil {
+		return nil, err
+	}
+
+	// TODO: make this prettier
+	matches := r.FindStringSubmatch(sql)
+	if len(matches) != 2 {
+		return nil, fmt.Errorf("unexpected match from sql %s", sql)
+	}
+	return &matches[1], nil
+}
+
+func parseInsertQueryValues(sql string, scheme tableScheme) ([]Record, error) {
+	records := make([]Record, 0)
+
+	valuesString, err := findValuesStringInInsertQuery(sql)
+	if err != nil {
+		return nil, err
+	}
+	for i := 0; i < len(*valuesString); i++ {
+		// TODO: make sure we encounter exactly one comma, no more and no less
+		// between parantheses
+		if isWhitespace(rune((*valuesString)[i])) || (*valuesString)[i] == ',' {
+			continue
+		}
+		tupleStrings, err := parseSingleValuesTuple(*valuesString, &i)
+		if err != nil {
+			return nil, err
+		}
+		record, err := valuesTupleIntoRecord(tupleStrings, scheme)
+		if err != nil {
+			return nil, err
+		}
+		records = append(records, *record)
+	}
+	return records, nil
+}
+
+func parseInsertQuery(db *openDB, sql string) (*insertQuery, error) {
+	sql = strings.ToLower(sql) // normalize query by lowering it
+	words := strings.FieldsFunc(sql, isWhitespace)
+	tableID := tableIDFromQuery(words, "into")
+	tablePointer, err := findTable(db, tableID)
+	if err != nil {
+		return nil, err
+	}
+	tableHeaders := parseTableHeaders(db, *tablePointer)
+	records, err := parseInsertQueryValues(sql, tableHeaders.scheme)
+	if err != nil {
+		return nil, err
+	}
+
+	return &insertQuery{tableID: tableID, records: records}, nil
 }
 
 func parseQueryType(sql string) (queryType, error) {

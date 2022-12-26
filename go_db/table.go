@@ -162,14 +162,17 @@ func addRecordToTableInternal(db *openDB, tablePointer dbPointer, recordData []b
 	writeBitToBitmap(db, int64(headers.bitmap.location), firstAvailableRecordNum, 1)
 }
 
+func addRecordOpenDb(db *openDB, tableID string, record Record) {
+	recordData := serializeRecord(db, record)
+	tablePointer, err := findTable(db, tableID)
+	check(err)
+	addRecordToTableInternal(db, *tablePointer, recordData)
+}
+
 func addRecordToTable(db database, tableID string, record Record) {
 	openDatabse := getOpenDB(db)
 	defer closeOpenDB(&openDatabse)
-
-	recordData := serializeRecord(&openDatabse, record)
-	tablePointer, err := findTable(&openDatabse, tableID)
-	check(err)
-	addRecordToTableInternal(&openDatabse, *tablePointer, recordData)
+	addRecordOpenDb(&openDatabse, tableID, record)
 }
 
 func readAllRecords(db database, tableID string) []Record {
@@ -229,11 +232,13 @@ func validateConditions(scheme tableScheme, recordsCondition conditionNode) bool
 	}
 }
 
-func filterRecordsFromTableInternal(openDatabase *openDB, tableID string, recordsCondition conditionNode) []Record {
+func filterRecordsFromTableInternal(openDatabase *openDB, tableID string, recordsCondition *conditionNode) []Record {
 	tablePointer, err := findTable(openDatabase, tableID)
 	check(err)
 	headers := parseTableHeaders(openDatabase, *tablePointer)
-	assert(validateConditions(headers.scheme, recordsCondition), "invalid condition")
+	if recordsCondition != nil {
+		assert(validateConditions(headers.scheme, *recordsCondition), "invalid condition")
+	}
 
 	bitmapData := readAllDataFromDbPointer(openDatabase, headers.bitmap.pointer)
 	scheme := headers.scheme
@@ -245,7 +250,7 @@ func filterRecordsFromTableInternal(openDatabase *openDB, tableID string, record
 			recordData := readFromDbPointer(openDatabase, recordsPointer.pointer, uint32(sizeOfRecord),
 				uint32(sizeOfRecord*i))
 			record := deserializeRecord(openDatabase, recordData, scheme)
-			if checkAllConditions(recordsCondition, record) {
+			if recordsCondition == nil || checkAllConditions(*recordsCondition, record) {
 				records = append(records, record)
 			}
 		}
@@ -253,7 +258,7 @@ func filterRecordsFromTableInternal(openDatabase *openDB, tableID string, record
 	return records
 }
 
-func filterRecordsFromTable(db database, tableID string, recordsCondition conditionNode) []Record {
+func filterRecordsFromTable(db database, tableID string, recordsCondition *conditionNode) []Record {
 	openDatabase := getOpenDB(db)
 	defer closeOpenDB(&openDatabase)
 

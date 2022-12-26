@@ -6,6 +6,7 @@ package go_db
 import (
 	"encoding/binary"
 	"strconv"
+	"strings"
 )
 
 type FieldType int8
@@ -23,6 +24,10 @@ var FIELD_TYPE_SERIALIZATION = map[FieldType]func([]byte) Field{
 
 var FIELD_TYPE_QUERY_VALUE_PARSE = map[FieldType]func(string) ([]byte, error){
 	FieldTypeInt: intQueryValueParse,
+}
+
+var STRING_TO_FIELD_FUNCS = map[FieldType]func(string) (Field, error){
+	FieldTypeInt: stringToIntField,
 }
 
 type Field interface {
@@ -57,6 +62,16 @@ func intQueryValueParse(data string) ([]byte, error) {
 		return nil, err
 	}
 	return uint32ToBytes(uint32(num)), nil
+}
+
+func stringToIntField(data string) (Field, error) {
+	// remove whitespaces from string
+	data = strings.Trim(data, " \t\r\n")
+	num, err := strconv.Atoi(data)
+	if err != nil {
+		return nil, err
+	}
+	return IntField{num}, nil
 }
 
 type BlobField struct {

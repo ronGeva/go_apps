@@ -107,7 +107,7 @@ func buildConditionTreeForTest() conditionNode {
 func TestRecordFilter(t *testing.T) {
 	cond := buildConditionTreeForTest()
 	db, tableID := buildTable2()
-	records := filterRecordsFromTable(db, tableID, cond)
+	records := filterRecordsFromTable(db, tableID, &cond)
 	if len(records) != 1 {
 		t.Fail()
 	}
@@ -195,4 +195,19 @@ func TestCursorSelect1(t *testing.T) {
 	if intField.Value != 5 {
 		t.Fail()
 	}
+}
+
+func TestCursorInsert1(t *testing.T) {
+	db, _ := buildTable2()
+	dbPath := db.id.identifyingString
+	conn, err := Connect(dbPath)
+	if err != nil {
+		t.Fail()
+	}
+	cursor := conn.OpenCursor()
+	err = cursor.Execute("insert into newTable values (13, 32), (41, 55), (37, 38)")
+	if err != nil {
+		t.Fail()
+	}
+	cursor.Execute("select columnA, columnB from newTable")
 }

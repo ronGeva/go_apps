@@ -9,6 +9,11 @@ type Cursor struct {
 	records []Record
 }
 
+var QUERY_TYPE_TO_FUNC = map[queryType]func(*openDB, *Cursor, string) error{
+	QueryTypeSelect: ExecuteSelectQuery,
+	QueryTypeInsert: ExecuteInsertQuery,
+}
+
 func Connect(path string) (Connection, error) {
 	db := database{id: databaseUniqueID{ioType: LocalFile, identifyingString: path}}
 	return Connection{db: db}, nil
@@ -28,6 +33,19 @@ func ExecuteSelectQuery(openDatabse *openDB, cursor *Cursor, sql string) error {
 	return nil
 }
 
+func ExecuteInsertQuery(openDatabse *openDB, cursor *Cursor, sql string) error {
+	query, err := parseInsertQuery(openDatabse, sql)
+	if err != nil {
+		return err
+	}
+	// TODO: optimize this for a slice of records instead of inserting each one
+	for _, record := range query.records {
+		addRecordOpenDb(openDatabse, query.tableID, record)
+	}
+
+	return nil
+}
+
 func (cursor *Cursor) Execute(sql string) error {
 	queryType, err := parseQueryType(sql)
 	if err != nil {
@@ -35,12 +53,12 @@ func (cursor *Cursor) Execute(sql string) error {
 	}
 	openDatabse := getOpenDB(cursor.conn.db)
 	defer closeOpenDB(&openDatabse)
-	if queryType == QueryTypeSelect {
-		err := ExecuteSelectQuery(&openDatabse, cursor, sql)
-		if err != nil {
-			return err
-		}
+
+	err = QUERY_TYPE_TO_FUNC[queryType](&openDatabse, cursor, sql)
+	if err != nil {
+		return err
 	}
+
 	return nil
 }
 
