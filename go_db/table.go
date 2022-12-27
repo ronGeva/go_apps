@@ -5,6 +5,8 @@ import (
 	"strings"
 )
 
+type recordsCallbackFunc[contextType any] func(record Record, index int, context contextType)
+
 type columndHeader struct {
 	columnName string
 	columnType FieldType
@@ -198,19 +200,34 @@ func readAllRecords(db database, tableID string) []Record {
 	return records
 }
 
+func deleteRecordInternal(db *openDB, headers tableHeaders, recordIndex int) error {
+	if !checkBit(db, headers.bitmap.pointer, recordIndex) {
+		return &RecordNotFoundError{}
+	}
+	writeBitToBitmap(db, headers.bitmap.location, uint32(recordIndex), 0)
+	return nil
+}
+
+func getTableHeaders(db *openDB, tableID string) (*tableHeaders, error) {
+	tablePointer, err := findTable(db, tableID)
+	if err != nil {
+		return nil, err
+	}
+
+	headers := parseTableHeaders(db, *tablePointer)
+	return &headers, nil
+}
+
 func deleteRecord(db database, tableID string, recordIndex int) error {
 	openDatabse := getOpenDB(db)
 	defer closeOpenDB(&openDatabse)
 
-	tablePointer, err := findTable(&openDatabse, tableID)
-	check(err)
-	headers := parseTableHeaders(&openDatabse, *tablePointer)
-
-	if !checkBit(&openDatabse, headers.bitmap.pointer, recordIndex) {
-		return &RecordNotFoundError{}
+	headers, err := getTableHeaders(&openDatabse, tableID)
+	if err != nil {
+		return err
 	}
-	writeBitToBitmap(&openDatabse, headers.bitmap.location, uint32(recordIndex), 0)
-	return nil
+
+	return deleteRecordInternal(&openDatabse, *headers, recordIndex)
 }
 
 func validateConditions(scheme tableScheme, recordsCondition conditionNode) bool {
@@ -232,7 +249,15 @@ func validateConditions(scheme tableScheme, recordsCondition conditionNode) bool
 	}
 }
 
-func filterRecordsFromTableInternal(openDatabase *openDB, tableID string, recordsCondition *conditionNode) []Record {
+func getRecordsCallback(record Record, index int, context *[]Record) {
+	if context == nil {
+		return
+	}
+	*context = append(*context, record)
+}
+
+func performForEachRecord[contextType any](openDatabase *openDB, tableID string, recordsCondition *conditionNode,
+	callback recordsCallbackFunc[contextType], context contextType) {
 	tablePointer, err := findTable(openDatabase, tableID)
 	check(err)
 	headers := parseTableHeaders(openDatabase, *tablePointer)
@@ -243,7 +268,6 @@ func filterRecordsFromTableInternal(openDatabase *openDB, tableID string, record
 	bitmapData := readAllDataFromDbPointer(openDatabase, headers.bitmap.pointer)
 	scheme := headers.scheme
 	recordsPointer := headers.records
-	records := make([]Record, 0)
 	sizeOfRecord := int(DB_POINTER_SIZE) * len(headers.scheme.columns)
 	for i := 0; i < int(recordsPointer.pointer.size)/sizeOfRecord; i++ {
 		if checkBitFromData(bitmapData, i) {
@@ -251,11 +275,40 @@ func filterRecordsFromTableInternal(openDatabase *openDB, tableID string, record
 				uint32(sizeOfRecord*i))
 			record := deserializeRecord(openDatabase, recordData, scheme)
 			if recordsCondition == nil || checkAllConditions(*recordsCondition, record) {
-				records = append(records, record)
+				callback(record, i, context)
 			}
 		}
 	}
+}
+
+func filterRecordsFromTableInternal(openDatabase *openDB, tableID string, recordsCondition *conditionNode) []Record {
+	records := make([]Record, 0)
+	performForEachRecord(openDatabase, tableID, recordsCondition, getRecordsCallback, &records)
 	return records
+}
+
+func saveIndexCallback(record Record, index int, context *[]int) {
+	*context = append(*context, index)
+}
+
+func deleteRecordsFromTableInternal(db *openDB, tableID string, recordsCondition *conditionNode) error {
+	recordsToDelete := make([]int, 0)
+	performForEachRecord(db, tableID, recordsCondition, saveIndexCallback, &recordsToDelete)
+	headers, err := getTableHeaders(db, tableID)
+	if err != nil {
+		return err
+	}
+	for _, index := range recordsToDelete {
+		deleteRecordInternal(db, *headers, index)
+	}
+	return nil
+}
+
+func deleteRecordsFromTable(db database, tableID string, recordsCondition *conditionNode) error {
+	openDatabase := getOpenDB(db)
+	defer closeOpenDB(&openDatabase)
+
+	return deleteRecordsFromTableInternal(&openDatabase, tableID, recordsCondition)
 }
 
 func filterRecordsFromTable(db database, tableID string, recordsCondition *conditionNode) []Record {

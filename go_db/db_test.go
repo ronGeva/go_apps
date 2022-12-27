@@ -129,6 +129,38 @@ func printConditionNode(node conditionNode, indent int) {
 	}
 }
 
+func TestDeleteRecordsFromTable(t *testing.T) {
+	cond := buildConditionTreeForTest()
+	db, tableID := buildTable2()
+	records := readAllRecords(db, tableID)
+	// Sanity
+	if len(records) != 2 {
+		t.Fail()
+	}
+	deleteRecordsFromTable(db, tableID, &cond)
+
+	// Now make sure records were deleted as expected
+	records = readAllRecords(db, tableID)
+	if len(records) != 1 {
+		t.Fail()
+	}
+	record := records[0]
+	firstField, ok := record.fields[0].(IntField)
+	if !ok {
+		t.Fail()
+	}
+	if firstField.Value != 13 {
+		t.Fail()
+	}
+	secondField, ok := record.fields[1].(IntField)
+	if !ok {
+		t.Fail()
+	}
+	if secondField.Value != 30 {
+		t.Fail()
+	}
+}
+
 func TestParseSelectQuery1(t *testing.T) {
 	db, _ := buildTable2()
 	openDB := getOpenDB(db)
