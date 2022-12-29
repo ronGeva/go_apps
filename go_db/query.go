@@ -12,6 +12,7 @@ const (
 	QueryTypeInvalid queryType = iota
 	QueryTypeSelect
 	QueryTypeInsert
+	QueryTypeDelete
 )
 
 type stringSet map[string]interface{}
@@ -30,6 +31,11 @@ type selectQuery struct {
 type insertQuery struct {
 	tableID string
 	records []Record
+}
+
+type deleteQuery struct {
+	tableID   string
+	condition *conditionNode
 }
 
 type parenthesesInterval struct {
@@ -57,6 +63,7 @@ type OperatorDescriptor struct {
 var QUERY_TYPE_MAP = map[string]queryType{
 	"select": QueryTypeSelect,
 	"insert": QueryTypeInsert,
+	"delete": QueryTypeDelete,
 }
 
 var LOGICAL_OPREATORS = []OperatorDescriptor{
@@ -371,7 +378,7 @@ func parseCondition(sql string, nameToIndex map[string]uint32, scheme tableSchem
 	return node, nil
 }
 
-func parseSelectWhere(sql string, nameToIndex map[string]uint32,
+func parseWhereStatement(sql string, nameToIndex map[string]uint32,
 	scheme tableScheme) (*conditionNode, error) {
 	whereIndex := strings.Index(sql, "where")
 	if whereIndex == -1 {
@@ -405,7 +412,7 @@ func parseSelectQuery(db *openDB, sql string) (*selectQuery, error) {
 	if err != nil {
 		return nil, err
 	}
-	cond, err := parseSelectWhere(sql, nameToIndex, tableHeaders.scheme)
+	cond, err := parseWhereStatement(sql, nameToIndex, tableHeaders.scheme)
 	if err != nil {
 		return nil, err
 	}
@@ -503,6 +510,28 @@ func parseInsertQuery(db *openDB, sql string) (*insertQuery, error) {
 	}
 
 	return &insertQuery{tableID: tableID, records: records}, nil
+}
+
+// TODO: remove code duplication between this functon and parseInsertQuery
+func parseDeleteQuery(db *openDB, sql string) (*deleteQuery, error) {
+	sql = strings.ToLower(sql) // normalize query by lowering it
+	words := strings.FieldsFunc(sql, isWhitespace)
+	tableID := tableIDFromQuery(words, "from")
+	tablePointer, err := findTable(db, tableID)
+	if err != nil {
+		return nil, err
+	}
+	tableHeaders := parseTableHeaders(db, *tablePointer)
+	nameToIndex := tableColumnNameToIndex(tableHeaders.scheme)
+	if err != nil {
+		return nil, err
+	}
+	cond, err := parseWhereStatement(sql, nameToIndex, tableHeaders.scheme)
+	if err != nil {
+		return nil, err
+	}
+
+	return &deleteQuery{tableID: tableID, condition: cond}, nil
 }
 
 func parseQueryType(sql string) (queryType, error) {

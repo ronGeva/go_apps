@@ -12,6 +12,7 @@ type Cursor struct {
 var QUERY_TYPE_TO_FUNC = map[queryType]func(*openDB, *Cursor, string) error{
 	QueryTypeSelect: ExecuteSelectQuery,
 	QueryTypeInsert: ExecuteInsertQuery,
+	QueryTypeDelete: ExecuteDeleteQuery,
 }
 
 func Connect(path string) (Connection, error) {
@@ -44,6 +45,15 @@ func ExecuteInsertQuery(openDatabse *openDB, cursor *Cursor, sql string) error {
 	}
 
 	return nil
+}
+
+func ExecuteDeleteQuery(openDatabse *openDB, cursor *Cursor, sql string) error {
+	query, err := parseDeleteQuery(openDatabse, sql)
+	if err != nil {
+		return err
+	}
+
+	return deleteRecordsFromTableInternal(openDatabse, query.tableID, query.condition)
 }
 
 func (cursor *Cursor) Execute(sql string) error {

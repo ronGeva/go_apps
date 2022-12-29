@@ -6,6 +6,12 @@ import (
 	"testing"
 )
 
+type testContext struct {
+	db      database
+	cursor  Cursor
+	tableID string
+}
+
 func initializeTestDB1() (database, string) {
 	path := "C:\\temp\\my_db"
 	tableID := "newTable"
@@ -46,6 +52,17 @@ func buildTable2() (database, string) {
 	newRecord = MakeRecord(fields)
 	addRecordToTable(db, tableID, newRecord)
 	return db, tableID
+}
+
+func getConnectionTable2() (*testContext, error) {
+	db, tableID := buildTable2()
+	dbPath := db.id.identifyingString
+	conn, err := Connect(dbPath)
+	if err != nil {
+		return nil, err
+	}
+	cursor := conn.OpenCursor()
+	return &testContext{db: db, cursor: cursor, tableID: tableID}, nil
 }
 
 func TestFullFlow(t *testing.T) {
@@ -242,4 +259,38 @@ func TestCursorInsert1(t *testing.T) {
 		t.Fail()
 	}
 	cursor.Execute("select columnA, columnB from newTable")
+
+	// The condition refers to a record we've just now added
+	err = cursor.Execute("Select columnA, ColumnB from newTable where columnA = 37")
+	if err != nil {
+		t.Fail()
+	}
+
+	records := cursor.FetchAll()
+	if len(records) != 1 {
+		t.Fail()
+	}
+}
+
+func TestCursorDelete1(t *testing.T) {
+	context, err := getConnectionTable2()
+	if err != nil {
+		t.Fail()
+	}
+	records := readAllRecords(context.db, context.tableID)
+	// sanity
+	if len(records) != 2 {
+		t.Fail()
+	}
+
+	// remove one record
+	err = context.cursor.Execute("delete from newTable where columnB = 30")
+	if err != nil {
+		t.Fail()
+	}
+
+	records = readAllRecords(context.db, context.tableID)
+	if len(records) != 1 {
+		t.Fail()
+	}
 }
