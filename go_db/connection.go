@@ -13,6 +13,7 @@ var QUERY_TYPE_TO_FUNC = map[queryType]func(*openDB, *Cursor, string) error{
 	QueryTypeSelect: ExecuteSelectQuery,
 	QueryTypeInsert: ExecuteInsertQuery,
 	QueryTypeDelete: ExecuteDeleteQuery,
+	QueryTypeCreate: ExecuteCreateQuery,
 }
 
 func Connect(path string) (Connection, error) {
@@ -54,6 +55,15 @@ func ExecuteDeleteQuery(openDatabse *openDB, cursor *Cursor, sql string) error {
 	}
 
 	return deleteRecordsFromTableInternal(openDatabse, query.tableID, query.condition)
+}
+
+func ExecuteCreateQuery(openDatabase *openDB, cursor *Cursor, sql string) error {
+	query, err := parseCreateQuery(openDatabase, sql)
+	if err != nil {
+		return err
+	}
+	writeNewTableLocalFileInternal(openDatabase, query.tableID, query.scheme)
+	return nil
 }
 
 func (cursor *Cursor) Execute(sql string) error {

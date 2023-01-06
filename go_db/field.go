@@ -30,6 +30,12 @@ var STRING_TO_FIELD_FUNCS = map[FieldType]func(string) (Field, error){
 	FieldTypeInt: stringToIntField,
 }
 
+var FIELD_STRING_TO_TYPE = map[string]FieldType{
+	"int":    FieldTypeInt,
+	"string": FieldTypeString,
+	"blob":   FieldTypeBlob,
+}
+
 type Field interface {
 	getType() FieldType
 	serialize() []byte

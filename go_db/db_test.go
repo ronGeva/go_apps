@@ -294,3 +294,21 @@ func TestCursorDelete1(t *testing.T) {
 		t.Fail()
 	}
 }
+
+func TestCursorCreateInsertSelect1(t *testing.T) {
+	db, _ := initializeTestDB1()
+	connection, err := Connect(db.id.identifyingString)
+	if err != nil {
+		t.Fail()
+	}
+
+	cursor := connection.OpenCursor()
+
+	cursor.Execute("create table newTable (columnA int, columnB int)")
+	cursor.Execute("insert into newTable values (13, 32), (41, 55), (37, 38)")
+	cursor.Execute("select columnA, columnB from newTable")
+	records := cursor.FetchAll()
+	if len(records) != 3 {
+		t.Fail()
+	}
+}

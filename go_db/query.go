@@ -13,6 +13,7 @@ const (
 	QueryTypeSelect
 	QueryTypeInsert
 	QueryTypeDelete
+	QueryTypeCreate
 )
 
 type stringSet map[string]interface{}
@@ -36,6 +37,11 @@ type insertQuery struct {
 type deleteQuery struct {
 	tableID   string
 	condition *conditionNode
+}
+
+type createQuery struct {
+	tableID string
+	scheme  tableScheme
 }
 
 type parenthesesInterval struct {
@@ -64,6 +70,7 @@ var QUERY_TYPE_MAP = map[string]queryType{
 	"select": QueryTypeSelect,
 	"insert": QueryTypeInsert,
 	"delete": QueryTypeDelete,
+	"create": QueryTypeCreate,
 }
 
 var LOGICAL_OPREATORS = []OperatorDescriptor{
@@ -532,6 +539,57 @@ func parseDeleteQuery(db *openDB, sql string) (*deleteQuery, error) {
 	}
 
 	return &deleteQuery{tableID: tableID, condition: cond}, nil
+}
+
+// Retrieve the single interval which belongs to a statement surrounded by parentheses
+// if none is found or there is more than one, return nil
+func singleParanthesesInterval(intervals []parenthesesInterval) *parenthesesInterval {
+	var result *parenthesesInterval
+	for _, interval := range intervals {
+		if interval.parentheses && result != nil {
+			return nil
+		}
+
+		if interval.parentheses && result == nil {
+			result = &interval
+		}
+	}
+
+	return result
+}
+
+func parseCreateQuery(db *openDB, sql string) (*createQuery, error) {
+	sql = strings.ToLower(sql) // normalize query by lowering it
+	words := strings.FieldsFunc(sql, isWhitespace)
+	tableID := tableIDFromQuery(words, "table")
+
+	intervals, err := divideStatementByParentheses(sql, 0, len(sql))
+	if err != nil {
+		return nil, err
+	}
+
+	headersStatementInterval := singleParanthesesInterval(intervals)
+	if headersStatementInterval == nil {
+		return nil, fmt.Errorf("faulty create query %s", sql)
+	}
+
+	headersStatemt := sql[headersStatementInterval.start:headersStatementInterval.end]
+	headerStrings := strings.Split(headersStatemt, ",")
+	headers := make([]columndHeader, 0)
+	for _, headerString := range headerStrings {
+		headerWords := strings.FieldsFunc(headerString, isWhitespace)
+		if len(headerWords) != 2 {
+			return nil, fmt.Errorf("%s is not a valid column header", headerString)
+		}
+		columnName := headerWords[0]
+		columnTypeStr := headerWords[1]
+		columnType, ok := FIELD_STRING_TO_TYPE[columnTypeStr]
+		if !ok {
+			return nil, fmt.Errorf("no such column type %s", columnTypeStr)
+		}
+		headers = append(headers, columndHeader{columnName: columnName, columnType: columnType})
+	}
+	return &createQuery{tableID: tableID, scheme: tableScheme{columns: headers}}, nil
 }
 
 func parseQueryType(sql string) (queryType, error) {

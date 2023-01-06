@@ -92,12 +92,16 @@ func initializeNewTableContent(db *openDB, tableID string, scheme tableScheme, t
 	tablePointer.pointer.size += DB_POINTER_SIZE
 }
 
+func writeNewTableLocalFileInternal(openDatabase *openDB, tableID string, scheme tableScheme) {
+	newTablePointer := allocateNewDataBlock(openDatabase)
+	mutablePointer := addNewTableToTablesArray(openDatabase, newTablePointer)
+	initializeNewTableContent(openDatabase, tableID, scheme, &mutablePointer)
+}
+
 func writeNewTableLocalFile(db database, tableID string, scheme tableScheme) {
 	openDatabase := getOpenDB(db)
 	defer closeOpenDB(&openDatabase)
-	newTablePointer := allocateNewDataBlock(&openDatabase)
-	mutablePointer := addNewTableToTablesArray(&openDatabase, newTablePointer)
-	initializeNewTableContent(&openDatabase, tableID, scheme, &mutablePointer)
+	writeNewTableLocalFileInternal(&openDatabase, tableID, scheme)
 }
 
 func writeNewTable(db database, tableID string, scheme tableScheme) {
