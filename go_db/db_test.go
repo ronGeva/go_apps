@@ -17,7 +17,7 @@ func initializeTestDB1() (database, string) {
 	tableID := "newTable"
 	os.Remove(path) // don't care about errors
 
-	initializeDB(path)
+	InitializeDB(path)
 	db := database{id: databaseUniqueID{ioType: LocalFile, identifyingString: path}}
 	return db, tableID
 }
