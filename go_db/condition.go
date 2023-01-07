@@ -121,7 +121,7 @@ func checkGreater(f Field, data []byte) (bool, error) {
 }
 
 func checkCondition(c condition, record Record) bool {
-	field := record.fields[c.fieldIndex]
+	field := record.Fields[c.fieldIndex]
 	conditionFunc := CONDITION_FUNCS[c.conditionType]
 	result, err := conditionFunc(field, c.conditionValue)
 	check(err) // TODO: handle error

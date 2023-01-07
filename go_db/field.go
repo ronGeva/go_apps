@@ -39,6 +39,7 @@ var FIELD_STRING_TO_TYPE = map[string]FieldType{
 type Field interface {
 	getType() FieldType
 	serialize() []byte
+	Stringify() string
 }
 
 type IntField struct {
@@ -54,6 +55,10 @@ func (field IntField) serialize() []byte {
 
 	binary.LittleEndian.PutUint32(res, uint32(field.Value))
 	return res
+}
+
+func (field IntField) Stringify() string {
+	return strconv.Itoa(field.Value)
 }
 
 func deserializeIntField(data []byte) Field {
@@ -90,6 +95,11 @@ func (field BlobField) getType() FieldType {
 
 func (field BlobField) serialize() []byte {
 	return field.Data
+}
+
+func (field BlobField) Stringify() string {
+	// TODO: implement(?)
+	return "binary data"
 }
 
 func deserializeBlobField(data []byte) Field {

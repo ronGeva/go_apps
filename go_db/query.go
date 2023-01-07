@@ -459,7 +459,7 @@ func valuesTupleIntoRecord(values []string, scheme tableScheme) (*Record, error)
 		}
 		fields = append(fields, field)
 	}
-	return &Record{fields: fields}, nil
+	return &Record{Fields: fields}, nil
 }
 
 func findValuesStringInInsertQuery(sql string) (*string, error) {

@@ -7,18 +7,18 @@ package go_db
 import "strconv"
 
 type Record struct {
-	fields []Field
+	Fields []Field
 }
 
 func MakeRecord(fields []Field) Record {
-	return Record{fields: fields}
+	return Record{Fields: fields}
 }
 
 // Serializes the record.
 // Writes remote data of db pointers as well
 func serializeRecord(openDatabse *openDB, record Record) []byte {
 	recordData := make([]byte, 0)
-	for _, field := range record.fields {
+	for _, field := range record.Fields {
 		fieldData := field.serialize()
 		if len(fieldData) <= 4 {
 			// field's data is small enough to be contained locally in a DB pointer
@@ -53,5 +53,5 @@ func deserializeRecord(db *openDB, recordData []byte, tableScheme tableScheme) R
 		deserializationFunc := FIELD_TYPE_SERIALIZATION[tableScheme.columns[i].columnType]
 		fields = append(fields, deserializationFunc(currData))
 	}
-	return Record{fields: fields}
+	return Record{Fields: fields}
 }

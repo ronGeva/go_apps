@@ -162,14 +162,14 @@ func TestDeleteRecordsFromTable(t *testing.T) {
 		t.Fail()
 	}
 	record := records[0]
-	firstField, ok := record.fields[0].(IntField)
+	firstField, ok := record.Fields[0].(IntField)
 	if !ok {
 		t.Fail()
 	}
 	if firstField.Value != 13 {
 		t.Fail()
 	}
-	secondField, ok := record.fields[1].(IntField)
+	secondField, ok := record.Fields[1].(IntField)
 	if !ok {
 		t.Fail()
 	}
@@ -236,7 +236,7 @@ func TestCursorSelect1(t *testing.T) {
 		t.Fail()
 	}
 	record := records[0]
-	firstField := record.fields[0]
+	firstField := record.Fields[0]
 	intField, ok := firstField.(IntField)
 	if !ok {
 		t.Fail()

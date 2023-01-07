@@ -18,6 +18,16 @@ var upgrader = websocket.Upgrader{
 	CheckOrigin:     func(r *http.Request) bool { return true },
 }
 
+type queryResult struct {
+	records []go_db.Record
+}
+
+type queryResponse struct {
+	Success bool
+	Error   string
+	Data    [][]string
+}
+
 func homePage(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, "home page")
 }
@@ -51,36 +61,37 @@ func performRequest(db string, query string) ([]go_db.Record, error) {
 	return cursor.FetchAll(), nil
 }
 
-func handleQueryRequest(msg map[string]interface{}) error {
+func handleQueryRequest(msg map[string]interface{}) (*queryResult, error) {
 	db, err := getStringValue(msg, "db")
 	if err != nil {
-		return err
+		return nil, err
 	}
 	query, err := getStringValue(msg, "query")
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	log.Printf("db=%s, query=%s", *db, *query)
-	_, err = performRequest(*db, *query)
-	return err
+	records, err := performRequest(*db, *query)
+
+	return &queryResult{records: records}, err
 }
 
-func handleCreationRequest(msg map[string]interface{}) error {
+func handleCreationRequest(msg map[string]interface{}) (*queryResult, error) {
 	dbPath, err := getStringValue(msg, "db")
 	if err != nil {
-		return err
+		return nil, err
 	}
 	go_db.InitializeDB(*dbPath)
-	return nil
+	return nil, nil
 }
 
-func handleNewMessage(conn *websocket.Conn) error {
+func handleNewMessage(conn *websocket.Conn) (*queryResult, error) {
 	// read in a message
 	_, p, err := conn.ReadMessage()
 	if err != nil {
 		log.Println(err)
-		return err
+		return nil, err
 	}
 	var msg map[string]interface{}
 
@@ -88,12 +99,12 @@ func handleNewMessage(conn *websocket.Conn) error {
 	err = json.Unmarshal(p, &msg)
 	if err != nil {
 		log.Println(err)
-		return err
+		return nil, err
 	}
 
 	msgType, err := getStringValue(msg, "type")
 	if err != nil {
-		return err
+		return nil, err
 	}
 	switch *msgType {
 	case "create":
@@ -101,17 +112,27 @@ func handleNewMessage(conn *websocket.Conn) error {
 	case "query":
 		return handleQueryRequest(msg)
 	default:
-		return fmt.Errorf("invalid request type %s", *msgType)
+		return nil, fmt.Errorf("invalid request type %s", *msgType)
 	}
 }
 
-func sendResult(conn *websocket.Conn, err error) {
-	result := make(map[string]string)
-	if err == nil {
-		result["success"] = "true"
+func sendResult(conn *websocket.Conn, err error, res *queryResult) {
+	var result queryResponse
+	result.Success = (err == nil)
+	if result.Success {
+		if res != nil {
+			allRecordsStr := make([][]string, 0)
+			for _, record := range res.records {
+				recordStr := make([]string, 0)
+				for _, f := range record.Fields {
+					recordStr = append(recordStr, f.Stringify())
+				}
+				allRecordsStr = append(allRecordsStr, recordStr)
+			}
+			result.Data = allRecordsStr
+		}
 	} else {
-		result["success"] = "false"
-		result["error"] = err.Error()
+		result.Error = err.Error()
 	}
 	data, marshalErr := json.Marshal(result)
 	if marshalErr != nil {
@@ -130,8 +151,8 @@ func sendResult(conn *websocket.Conn, err error) {
 func reader(conn *websocket.Conn) {
 	for {
 		// read in a message
-		err := handleNewMessage(conn)
-		sendResult(conn, err)
+		res, err := handleNewMessage(conn)
+		sendResult(conn, err, res)
 	}
 }
 

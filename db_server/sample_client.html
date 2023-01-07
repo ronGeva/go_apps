@@ -7,7 +7,8 @@
     <title>Go WebSocket Tutorial</title>
   </head>
   <body>
-    <h2>Hello World</h2>
+    <h2>Sample DB UI</h2>
+    <h3>Query an existing DB</h3>
     <br/>
 
     db: <input type="text" id="db"/> <br/>
@@ -39,11 +40,11 @@
         socket.onmessage = msg => {
           console.log(msg);
           let res = JSON.parse(msg.data);
-          if ("success" in res) {
-            if (res["success"] == "false") {
-              console.log(res["error"])
+          if ("Success" in res) {
+            if (!res["Success"]) {
+              console.log(res["Error"])
             } else {
-              console.log(res["data"])
+              console.log(res["Data"])
             }
           }
         }
