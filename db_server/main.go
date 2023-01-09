@@ -28,10 +28,6 @@ type queryResponse struct {
 	Data    [][]string
 }
 
-func homePage(w http.ResponseWriter, r *http.Request) {
-	fmt.Fprintf(w, "home page")
-}
-
 func getStringValue(msg map[string]interface{}, key string) (*string, error) {
 	v, ok := msg[key]
 	if !ok {
@@ -172,7 +168,6 @@ func wsEndpoint(w http.ResponseWriter, r *http.Request) {
 func main() {
 	fmt.Println("Starting server...")
 
-	http.HandleFunc("/", homePage)
 	http.HandleFunc("/ws", wsEndpoint)
 	err := http.ListenAndServe(":5678", nil)
 	if err != nil {
