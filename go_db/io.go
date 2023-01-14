@@ -100,6 +100,7 @@ func readVariableSizeDataFromDB(db *openDB, offset uint32) []byte {
 	return readFromDB(db, size, offset+4)
 }
 
+// Returns the data of the block requested, as well as the offset of the next data block
 func readDataBlock(db *openDB, offset uint32) ([]byte, uint32) {
 	dataBlockSize := db.header.dataBlockSize
 	if offset%dataBlockSize != 0 {

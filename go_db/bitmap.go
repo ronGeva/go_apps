@@ -1,5 +1,7 @@
 package go_db
 
+import "fmt"
+
 func checkBitFromData(bitmap []byte, index int) bool {
 	return bool((int(bitmap[index/8]) & (1 << (index % 8))) != 0)
 }
@@ -10,8 +12,8 @@ func checkBit(db *openDB, bitmap dbPointer, index int) bool {
 	}
 	// TODO: use offset once it is implemented in readFromDbPointer
 	containingByte := uint32(index / 8)
-	data := readFromDbPointer(db, bitmap, containingByte+1, 0)
-	return checkBitFromData(data, index)
+	data := readFromDbPointer(db, bitmap, 1, containingByte)
+	return checkBitFromData(data, index%8)
 }
 
 func findFirstAvailableBlock(bitmap []byte) uint32 {
@@ -62,4 +64,24 @@ func allocateNewDataBlock(db *openDB) dbPointer {
 	check(err)
 	assert(n == int(db.header.dataBlockSize), "Failed to write new data block")
 	return dbPointer{offset: uint32(blockOffset), size: 0}
+}
+
+// Marks all the data blocks belonging to a pointer as invalid
+func deallocateDbPointer(db *openDB, pointer mutableDbPointer) error {
+	blockOffset := uint32(pointer.location)
+	for blockOffset != 0 {
+		blockIndex := blockOffset / db.header.dataBlockSize
+
+		// Make sure the data block is currently valid
+		if !checkBit(db, db.header.bitmapPointer, int(blockIndex)) {
+			return fmt.Errorf("cannot deallocate a non-allocated block %d", blockIndex)
+		}
+		// Read the offset of the next data block
+		_, blockOffset = readDataBlock(db, blockIndex*db.header.dataBlockSize)
+
+		// Mark the data block as invalid
+		writeBitToBitmap(db, int64(DATABLOCK_BITMAP_POINTER_OFFSET), uint32(blockIndex), 0)
+	}
+
+	return nil
 }

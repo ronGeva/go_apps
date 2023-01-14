@@ -1,6 +1,7 @@
 package go_db
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"testing"
@@ -309,6 +310,44 @@ func TestCursorCreateInsertSelect1(t *testing.T) {
 	cursor.Execute("select columnA, columnB from newTable")
 	records := cursor.FetchAll()
 	if len(records) != 3 {
+		t.Fail()
+	}
+}
+
+func TestUpdateRecordsViaCondition(t *testing.T) {
+	cond := buildConditionTreeForTest()
+	db, tableID := buildTable2()
+	recordsBefore := readAllRecords(db, tableID)
+	// Sanity
+	if len(recordsBefore) != 2 {
+		t.FailNow()
+	}
+
+	update := recordUpdate{[]recordChange{{fieldIndex: 0, newData: []byte{1, 0, 0, 0}}}}
+	openDatabase := getOpenDB(db)
+	err := updateRecordsViaCondition(&openDatabase, tableID, &cond, update)
+	closeOpenDB(&openDatabase)
+	if err != nil {
+		t.Fail()
+	}
+
+	recordsAfter := readAllRecords(db, tableID)
+	// Sanity
+	if len(recordsAfter) != 2 {
+		t.Fail()
+	}
+
+	// Make sure only the expected change occur, and all else remained the same
+	if !bytes.Equal(recordsAfter[0].Fields[0].serialize(), []byte{1, 0, 0, 0}) {
+		t.Fail()
+	}
+	if !bytes.Equal(recordsAfter[0].Fields[1].serialize(), recordsBefore[0].Fields[1].serialize()) {
+		t.Fail()
+	}
+	if !bytes.Equal(recordsAfter[1].Fields[0].serialize(), recordsBefore[1].Fields[0].serialize()) {
+		t.Fail()
+	}
+	if !bytes.Equal(recordsAfter[1].Fields[1].serialize(), recordsBefore[1].Fields[1].serialize()) {
 		t.Fail()
 	}
 }

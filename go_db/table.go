@@ -2,6 +2,7 @@ package go_db
 
 import (
 	"encoding/binary"
+	"fmt"
 	"strings"
 )
 
@@ -27,6 +28,22 @@ type tableHeaders struct {
 	scheme  tableScheme
 	bitmap  mutableDbPointer
 	records mutableDbPointer
+}
+
+func (headers *tableHeaders) fieldOffset(recordIndex int, fieldIndex int) int {
+	if fieldIndex >= len(headers.scheme.columns) {
+		return -1
+	}
+	return int(DB_POINTER_SIZE) * (len(headers.scheme.columns)*recordIndex + fieldIndex)
+}
+
+type recordChange struct {
+	fieldIndex int
+	newData    []byte
+}
+
+type recordUpdate struct {
+	changes []recordChange
 }
 
 func addNewTableToTablesArray(db *openDB, newTablePointer dbPointer) mutableDbPointer {
@@ -320,4 +337,64 @@ func filterRecordsFromTable(db database, tableID string, recordsCondition *condi
 	defer closeOpenDB(&openDatabase)
 
 	return filterRecordsFromTableInternal(&openDatabase, tableID, recordsCondition)
+}
+
+func updateField(db *openDB, headers tableHeaders, offset uint32, change recordChange) error {
+	fieldData := readFromDbPointer(db, headers.records.pointer, DB_POINTER_SIZE, offset)
+	fieldPointer := deserializeDbPointer(fieldData)
+	fieldMutablePointer := mutableDbPointer{pointer: fieldPointer, location: int64(offset)}
+	if fieldPointer.offset != 0 {
+		// Field contains a db pointer, actual data is in its own data block
+		// Deallocate this data block
+		err := deallocateDbPointer(db, fieldMutablePointer)
+		if err != nil {
+			return err
+		}
+	}
+
+	// Write new data
+	newFieldData := serializeField(db, change.newData)
+	writeToDataBlock(db, headers.records.pointer, newFieldData, offset)
+	return nil
+}
+
+func updateRecord(db *openDB, headers tableHeaders, recordIndex int, update recordUpdate) error {
+	if !checkBit(db, headers.bitmap.pointer, recordIndex) {
+		return fmt.Errorf("cannot update an invalid record index %d", recordIndex)
+	}
+	for _, change := range update.changes {
+		offset := uint32(headers.fieldOffset(recordIndex, change.fieldIndex))
+		err := updateField(db, headers, offset, change)
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func updateRecords(db *openDB, headers tableHeaders, recordIndexes []int, update recordUpdate) error {
+	for _, recordIndex := range recordIndexes {
+		err := updateRecord(db, headers, recordIndex, update)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func updateRecordsViaCondition(db *openDB, tableID string, condition *conditionNode, update recordUpdate) error {
+	tableHeaders, err := getTableHeaders(db, tableID)
+	if err != nil {
+		return err
+	}
+
+	recordIndexes := make([]int, 0)
+	performForEachRecord(db, tableID, condition, saveIndexCallback, &recordIndexes)
+
+	err = updateRecords(db, *tableHeaders, recordIndexes, update)
+	if err != nil {
+		return err
+	}
+	return nil
 }

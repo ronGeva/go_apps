@@ -14,22 +14,29 @@ func MakeRecord(fields []Field) Record {
 	return Record{Fields: fields}
 }
 
+func serializeField(openDatabase *openDB, fieldData []byte) []byte {
+	data := make([]byte, 0)
+	if len(fieldData) <= 4 {
+		// field's data is small enough to be contained locally in a DB pointer
+		data = append(data, uint32ToBytes(0)...) // offset == 0, to represent a null pointer
+		data = append(data, fieldData...)
+	} else {
+		pointer := allocateNewDataBlock(openDatabase)
+		appendDataToDataBlockImmutablePointer(openDatabase, fieldData, pointer)
+		pointer.size = uint32(len(fieldData))
+		data = append(data, serializeDbPointer(pointer)...)
+	}
+
+	return data
+}
+
 // Serializes the record.
 // Writes remote data of db pointers as well
 func serializeRecord(openDatabse *openDB, record Record) []byte {
 	recordData := make([]byte, 0)
 	for _, field := range record.Fields {
 		fieldData := field.serialize()
-		if len(fieldData) <= 4 {
-			// field's data is small enough to be contained locally in a DB pointer
-			recordData = append(recordData, uint32ToBytes(0)...) // offset == 0, to represent a null pointer
-			recordData = append(recordData, fieldData...)
-		} else {
-			pointer := allocateNewDataBlock(openDatabse)
-			appendDataToDataBlockImmutablePointer(openDatabse, fieldData, pointer)
-			pointer.size = uint32(len(fieldData))
-			recordData = append(recordData, serializeDbPointer(pointer)...)
-		}
+		recordData = append(recordData, serializeField(openDatabse, fieldData)...)
 	}
 	return recordData
 }
