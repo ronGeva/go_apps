@@ -23,6 +23,14 @@ type dbPointer struct {
 	size   uint32
 }
 
+// Must conform to the interface exposed by os.File
+type IoInterface interface {
+	Seek(offset int64, whence int) (ret int64, err error)
+	Read(b []byte) (n int, err error)
+	Write(b []byte) (n int, err error)
+	Close() error
+}
+
 type mutableDbPointer struct {
 	pointer  dbPointer
 	location int64
@@ -36,7 +44,7 @@ type dbHeader struct {
 }
 
 type openDB struct {
-	f      *os.File
+	f      IoInterface
 	header dbHeader
 }
 
@@ -48,7 +56,7 @@ func uint32ToBytes(num uint32) []byte {
 	return b
 }
 
-func readFromFile(f *os.File, size uint32, offset uint32) []byte {
+func readFromFile(f IoInterface, size uint32, offset uint32) []byte {
 	f.Seek(int64(offset), 0)
 
 	pointerData := make([]byte, size)
@@ -62,7 +70,7 @@ func readFromDB(db *openDB, size uint32, offset uint32) []byte {
 	return readFromFile(db.f, size, offset)
 }
 
-func writeToFile(f *os.File, data []byte, offset uint32) {
+func writeToFile(f IoInterface, data []byte, offset uint32) {
 	f.Seek(int64(offset), 0)
 	sizeWritten, err := f.Write(data)
 	check(err)
