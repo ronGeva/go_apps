@@ -336,6 +336,24 @@ func TestCursorCreateInsertSelect1(t *testing.T) {
 	}
 }
 
+func TestCursorCreateInsertSelect2(t *testing.T) {
+	db, _ := initializeTestDB1()
+	connection, err := Connect(db.id.identifyingString)
+	if err != nil {
+		t.Fail()
+	}
+
+	cursor := connection.OpenCursor()
+
+	cursor.Execute("create table newTable (columnA blob, columnB int)")
+	cursor.Execute("insert into newTable values (ab34ffffffff, 32), (0000, 55), (abcdef, 38)")
+	cursor.Execute("select columnA, columnB from newTable")
+	records := cursor.FetchAll()
+	if len(records) != 3 {
+		t.Fail()
+	}
+}
+
 func TestUpdateRecordsViaCondition(t *testing.T) {
 	cond := buildConditionTreeForTest()
 	db, tableID := buildTable2()

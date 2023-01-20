@@ -16,8 +16,8 @@ Structure of a local DB:
 Structure of db pointer:
 <offset in the file of data block> - 4 bytes
 <total size of data (in all stringed data blocks combined)> - 4 bytes
-A null pointer (pointer whose offset equal 0) contains the data itself in the size field,
-which allows us to avoid seeking the data in the file in case it is of small, fixed size (for example - int).
+A pointer with offset < DATA_BLOCK_SIZE holds the data itself in the size field.
+The value of the offset in this case holds the size of the data (0 to 4 bytes).
 
 Structure of free blocks bitmap:
 <bits> - <size of bitmap>

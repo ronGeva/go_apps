@@ -2,7 +2,9 @@ package go_db
 
 import (
 	"encoding/binary"
+	"fmt"
 	"io"
+	"math"
 	"os"
 )
 
@@ -118,10 +120,27 @@ func readDataBlock(db *openDB, offset uint32) ([]byte, uint32) {
 	return data, nextOffset
 }
 
+func putVariableSizeInt(res []byte, val uint32) error {
+	// Make sure res is big enough to contain val
+	if uint64(math.Pow(2, float64(8*len(res)))) <= uint64(val) {
+		return fmt.Errorf("cannot cast value %d to byte array of size %d",
+			val, len(res))
+	}
+
+	// little endian
+	for i := 0; i < len(res); i++ {
+		res[i] = byte(val % 256)
+		val /= 256
+	}
+	return nil
+}
+
 func readFromDbPointer(db *openDB, pointer dbPointer, size uint32, offset uint32) []byte {
-	if pointer.offset == 0 {
-		res := make([]byte, 4)
-		binary.LittleEndian.PutUint32(res, pointer.size)
+	if pointer.offset <= 4 {
+		// pointer.offset holds the size of the data in the size field
+		res := make([]byte, pointer.offset)
+
+		putVariableSizeInt(res, pointer.size)
 		return res // the size contains the actual value
 	}
 

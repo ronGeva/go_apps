@@ -18,8 +18,11 @@ func serializeField(openDatabase *openDB, fieldData []byte) []byte {
 	data := make([]byte, 0)
 	if len(fieldData) <= 4 {
 		// field's data is small enough to be contained locally in a DB pointer
-		data = append(data, uint32ToBytes(0)...) // offset == 0, to represent a null pointer
+		// offset < DATA_BLOCK_SIZE, to represent the data is resident
+		data = append(data, uint32ToBytes(uint32(len(fieldData)))...)
 		data = append(data, fieldData...)
+		zeroPadding := make([]byte, 4-len(fieldData))
+		data = append(data, zeroPadding...)
 	} else {
 		pointer := allocateNewDataBlock(openDatabase)
 		appendDataToDataBlockImmutablePointer(openDatabase, fieldData, pointer)

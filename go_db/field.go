@@ -5,6 +5,7 @@ package go_db
 
 import (
 	"encoding/binary"
+	"encoding/hex"
 	"strconv"
 	"strings"
 )
@@ -23,11 +24,13 @@ var FIELD_TYPE_SERIALIZATION = map[FieldType]func([]byte) Field{
 }
 
 var FIELD_TYPE_QUERY_VALUE_PARSE = map[FieldType]func(string) ([]byte, error){
-	FieldTypeInt: intQueryValueParse,
+	FieldTypeInt:  intQueryValueParse,
+	FieldTypeBlob: blobQueryValueParse,
 }
 
 var STRING_TO_FIELD_FUNCS = map[FieldType]func(string) (Field, error){
-	FieldTypeInt: stringToIntField,
+	FieldTypeInt:  stringToIntField,
+	FieldTypeBlob: stringToBlobField,
 }
 
 var FIELD_STRING_TO_TYPE = map[string]FieldType{
@@ -75,6 +78,11 @@ func intQueryValueParse(data string) ([]byte, error) {
 	return uint32ToBytes(uint32(num)), nil
 }
 
+func blobQueryValueParse(data string) ([]byte, error) {
+	// Assume the string represents the hexadecimal encoding of the data
+	return hex.DecodeString(data)
+}
+
 func stringToIntField(data string) (Field, error) {
 	// remove whitespaces from string
 	data = strings.Trim(data, " \t\r\n")
@@ -83,6 +91,14 @@ func stringToIntField(data string) (Field, error) {
 		return nil, err
 	}
 	return IntField{num}, nil
+}
+
+func stringToBlobField(data string) (Field, error) {
+	byteData, err := blobQueryValueParse(data)
+	if err != nil {
+		return nil, err
+	}
+	return BlobField{Data: byteData}, nil
 }
 
 type BlobField struct {
@@ -98,8 +114,12 @@ func (field BlobField) serialize() []byte {
 }
 
 func (field BlobField) Stringify() string {
-	// TODO: implement(?)
-	return "binary data"
+	if len(field.Data) < 50 {
+		// Data is small enough, we can represent it to the user
+		return hex.EncodeToString(field.Data)
+	}
+
+	return "large binary data"
 }
 
 func deserializeBlobField(data []byte) Field {
