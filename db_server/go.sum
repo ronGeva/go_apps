@@ -1,2 +1,4 @@
 github.com/gorilla/websocket v1.5.0 h1:PPwGk2jz7EePpoHN/+ClbZu8SPxiqlu12wZP/3sWmnc=
 github.com/gorilla/websocket v1.5.0/go.mod h1:YR8l580nyteQvAITg2hZ9XVh4b55+EU/adAjf1fMHhE=
+github.com/ronGeva/go_apps/go_db v0.0.0-20230120182023-05ccbd4ea983 h1:R9DHd8Lgdif7bd2jsnfgv/g0V2Gggz/yji/whUTXgiU=
+github.com/ronGeva/go_apps/go_db v0.0.0-20230120182023-05ccbd4ea983/go.mod h1:3vWg/SoiobmOVsdO4p1MryjG/MreNjJx/HcASbGX+Zs=
