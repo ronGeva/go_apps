@@ -13,6 +13,28 @@ type testContext struct {
 	tableID string
 }
 
+func areFieldsEqual(field1 Field, field2 Field) bool {
+	if field1.getType() != field2.getType() {
+		return false
+	}
+
+	data1 := field1.serialize()
+	data2 := field2.serialize()
+	return bytes.Compare(data1, data2) == 0
+}
+
+func areRecordsEqual(record1 Record, record2 Record) bool {
+	if len(record1.Fields) != len(record2.Fields) {
+		return false
+	}
+	for i := 0; i < len(record1.Fields); i++ {
+		if !areFieldsEqual(record1.Fields[i], record2.Fields[i]) {
+			return false
+		}
+	}
+	return true
+}
+
 func initializeTestDB1() (database, string) {
 	path := "C:\\temp\\my_db"
 	tableID := "newTable"
@@ -348,6 +370,40 @@ func TestUpdateRecordsViaCondition(t *testing.T) {
 		t.Fail()
 	}
 	if !bytes.Equal(recordsAfter[1].Fields[1].serialize(), recordsBefore[1].Fields[1].serialize()) {
+		t.Fail()
+	}
+}
+
+func TestCursorUpdate1(t *testing.T) {
+	db, tableID := buildTable2()
+	dbPath := db.id.identifyingString
+	recordsBefore := readAllRecords(db, tableID)
+	if len(recordsBefore) != 2 {
+		t.Fail()
+	}
+
+	conn, err := Connect(dbPath)
+	if err != nil {
+		t.Fail()
+	}
+	cursor := conn.OpenCursor()
+	err = cursor.Execute("update newTable set columnA=33,columnB=89 where columnA=5")
+	if err != nil {
+		t.Fail()
+	}
+
+	recordsAfter := readAllRecords(db, tableID)
+	// Sanity
+	if len(recordsAfter) != 2 {
+		t.Fail()
+	}
+
+	if !areRecordsEqual(recordsBefore[1], recordsAfter[1]) {
+		t.Fail() // unintended change
+	}
+
+	expectedFirstRecord := Record{[]Field{IntField{33}, IntField{89}}}
+	if !areRecordsEqual(expectedFirstRecord, recordsAfter[0]) {
 		t.Fail()
 	}
 }

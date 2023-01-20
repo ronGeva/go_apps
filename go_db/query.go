@@ -14,6 +14,7 @@ const (
 	QueryTypeInsert
 	QueryTypeDelete
 	QueryTypeCreate
+	QueryTypeUpdate
 )
 
 type stringSet map[string]interface{}
@@ -44,6 +45,12 @@ type createQuery struct {
 	scheme  tableScheme
 }
 
+type updateQuery struct {
+	tableID   string
+	condition *conditionNode
+	update    recordUpdate
+}
+
 type parenthesesInterval struct {
 	start       int
 	end         int
@@ -71,6 +78,7 @@ var QUERY_TYPE_MAP = map[string]queryType{
 	"insert": QueryTypeInsert,
 	"delete": QueryTypeDelete,
 	"create": QueryTypeCreate,
+	"update": QueryTypeUpdate,
 }
 
 var LOGICAL_OPREATORS = []OperatorDescriptor{
@@ -401,6 +409,16 @@ func parseWhereStatement(sql string, nameToIndex map[string]uint32,
 	return node, nil
 }
 
+func parseWhereStatementInQuery(db *openDB, sql string, tableID string) (*conditionNode, error) {
+	tablePointer, err := findTable(db, tableID)
+	if err != nil {
+		return nil, err
+	}
+	tableHeaders := parseTableHeaders(db, *tablePointer)
+	nameToIndex := tableColumnNameToIndex(tableHeaders.scheme)
+	return parseWhereStatement(sql, nameToIndex, tableHeaders.scheme)
+}
+
 func parseSelectQuery(db *openDB, sql string) (*selectQuery, error) {
 	sql = strings.ToLower(sql) // normalize query by lowering it
 	words := strings.FieldsFunc(sql, isWhitespace)
@@ -524,16 +542,7 @@ func parseDeleteQuery(db *openDB, sql string) (*deleteQuery, error) {
 	sql = strings.ToLower(sql) // normalize query by lowering it
 	words := strings.FieldsFunc(sql, isWhitespace)
 	tableID := tableIDFromQuery(words, "from")
-	tablePointer, err := findTable(db, tableID)
-	if err != nil {
-		return nil, err
-	}
-	tableHeaders := parseTableHeaders(db, *tablePointer)
-	nameToIndex := tableColumnNameToIndex(tableHeaders.scheme)
-	if err != nil {
-		return nil, err
-	}
-	cond, err := parseWhereStatement(sql, nameToIndex, tableHeaders.scheme)
+	cond, err := parseWhereStatementInQuery(db, sql, tableID)
 	if err != nil {
 		return nil, err
 	}
@@ -590,6 +599,76 @@ func parseCreateQuery(db *openDB, sql string) (*createQuery, error) {
 		headers = append(headers, columndHeader{columnName: columnName, columnType: columnType})
 	}
 	return &createQuery{tableID: tableID, scheme: tableScheme{columns: headers}}, nil
+}
+
+func getUpdateSetStatement(sql string) (string, error) {
+	setIndex := strings.Index(sql, "set")
+	if setIndex == -1 {
+		return "", fmt.Errorf("no set statement found in update query")
+	}
+	whereIndex := strings.Index(sql, "where")
+	if whereIndex == -1 {
+		// No where statement in query, this is a valid case
+		whereIndex = len(sql)
+	}
+
+	if whereIndex < setIndex {
+		return "", fmt.Errorf(
+			"where statement cannot appear before set statement in update query")
+	}
+	return removeWhitespaces(sql[setIndex+len("set") : whereIndex]), nil
+}
+
+func parseUpdateSetStatement(db *openDB, sql string, scheme tableScheme) (*recordUpdate, error) {
+	setStatement, err := getUpdateSetStatement(sql)
+	if err != nil {
+		return nil, err
+	}
+
+	nameToIndex := tableColumnNameToIndex(scheme)
+	setAssignments := strings.Split(setStatement, ",")
+	changes := make([]recordChange, 0)
+	for _, assignment := range setAssignments {
+		operands := strings.Split(assignment, "=")
+		if len(operands) != 2 {
+			return nil, fmt.Errorf("invalid set assignment %s", assignment)
+		}
+		columnName, val := operands[0], operands[1]
+
+		fieldIndex, exists := nameToIndex[columnName]
+		if !exists {
+			return nil, fmt.Errorf("no such column name %s (in set statement %s)", columnName, assignment)
+		}
+		byteVal, err := FIELD_TYPE_QUERY_VALUE_PARSE[scheme.columns[fieldIndex].columnType](val)
+		if err != nil {
+			return nil, fmt.Errorf("invalid value for field %s : %s", columnName, val)
+		}
+		changes = append(changes, recordChange{fieldIndex: int(fieldIndex), newData: byteVal})
+	}
+
+	return &recordUpdate{changes: changes}, nil
+}
+
+func parseUpdateQuery(db *openDB, sql string) (*updateQuery, error) {
+	sql = strings.ToLower(sql) // normalize query by lowering it
+	words := strings.FieldsFunc(sql, isWhitespace)
+	tableID := tableIDFromQuery(words, "update")
+	cond, err := parseWhereStatementInQuery(db, sql, tableID)
+	if err != nil {
+		return nil, err
+	}
+
+	headers, err := getTableHeaders(db, tableID)
+	if err != nil {
+		return nil, err
+	}
+
+	update, err := parseUpdateSetStatement(db, sql, headers.scheme)
+	if err != nil {
+		return nil, err
+	}
+
+	return &updateQuery{tableID: tableID, condition: cond, update: *update}, nil
 }
 
 func parseQueryType(sql string) (queryType, error) {
