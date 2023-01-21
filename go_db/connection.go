@@ -31,7 +31,11 @@ func ExecuteSelectQuery(openDatabse *openDB, cursor *Cursor, sql string) error {
 	if err != nil {
 		return err
 	}
-	records := filterRecordsFromTableInternal(openDatabse, query.tableID, query.condition)
+	records, err := filterRecordsFromTableInternal(openDatabse, query.tableID, query.condition, query.columns)
+	if err != nil {
+		return err
+	}
+
 	cursor.records = records
 	return nil
 }

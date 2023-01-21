@@ -270,20 +270,38 @@ func validateConditions(scheme tableScheme, recordsCondition conditionNode) bool
 	}
 }
 
-func getRecordsCallback(record Record, index int, context *[]Record) {
+type getRecordsContext struct {
+	records          []Record
+	requestedColumns []uint32
+}
+
+func getRecordsCallback(record Record, index int, context *getRecordsContext) {
 	if context == nil {
 		return
 	}
-	*context = append(*context, record)
+
+	if context.requestedColumns == nil {
+		// Just add the record as is
+		context.records = append(context.records, record)
+	}
+
+	newRecord := Record{}
+	for _, index := range context.requestedColumns {
+		newRecord.Fields = append(newRecord.Fields, record.Fields[index])
+	}
+
+	context.records = append(context.records, newRecord)
 }
 
 func performForEachRecord[contextType any](openDatabase *openDB, tableID string, recordsCondition *conditionNode,
-	callback recordsCallbackFunc[contextType], context contextType) {
+	callback recordsCallbackFunc[contextType], context contextType) error {
 	tablePointer, err := findTable(openDatabase, tableID)
-	check(err)
+	if err != nil {
+		return err
+	}
 	headers := parseTableHeaders(openDatabase, *tablePointer)
-	if recordsCondition != nil {
-		assert(validateConditions(headers.scheme, *recordsCondition), "invalid condition")
+	if recordsCondition != nil && !validateConditions(headers.scheme, *recordsCondition) {
+		return fmt.Errorf("invalid condition in query")
 	}
 
 	bitmapData := readAllDataFromDbPointer(openDatabase, headers.bitmap.pointer)
@@ -300,12 +318,17 @@ func performForEachRecord[contextType any](openDatabase *openDB, tableID string,
 			}
 		}
 	}
+	return nil
 }
 
-func filterRecordsFromTableInternal(openDatabase *openDB, tableID string, recordsCondition *conditionNode) []Record {
-	records := make([]Record, 0)
-	performForEachRecord(openDatabase, tableID, recordsCondition, getRecordsCallback, &records)
-	return records
+func filterRecordsFromTableInternal(openDatabase *openDB, tableID string, recordsCondition *conditionNode, columns []uint32) ([]Record, error) {
+	context := getRecordsContext{records: make([]Record, 0), requestedColumns: columns}
+	err := performForEachRecord(openDatabase, tableID, recordsCondition, getRecordsCallback, &context)
+	if err != nil {
+		return nil, err
+	}
+
+	return context.records, nil
 }
 
 func saveIndexCallback(record Record, index int, context *[]int) {
@@ -314,7 +337,11 @@ func saveIndexCallback(record Record, index int, context *[]int) {
 
 func deleteRecordsFromTableInternal(db *openDB, tableID string, recordsCondition *conditionNode) error {
 	recordsToDelete := make([]int, 0)
-	performForEachRecord(db, tableID, recordsCondition, saveIndexCallback, &recordsToDelete)
+	err := performForEachRecord(db, tableID, recordsCondition, saveIndexCallback, &recordsToDelete)
+	if err != nil {
+		return err
+	}
+
 	headers, err := getTableHeaders(db, tableID)
 	if err != nil {
 		return err
@@ -332,11 +359,11 @@ func deleteRecordsFromTable(db database, tableID string, recordsCondition *condi
 	return deleteRecordsFromTableInternal(&openDatabase, tableID, recordsCondition)
 }
 
-func filterRecordsFromTable(db database, tableID string, recordsCondition *conditionNode) []Record {
+func filterRecordsFromTable(db database, tableID string, recordsCondition *conditionNode) ([]Record, error) {
 	openDatabase := getOpenDB(db)
 	defer closeOpenDB(&openDatabase)
 
-	return filterRecordsFromTableInternal(&openDatabase, tableID, recordsCondition)
+	return filterRecordsFromTableInternal(&openDatabase, tableID, recordsCondition, nil)
 }
 
 func updateField(db *openDB, headers tableHeaders, offset uint32, change recordChange) error {
@@ -390,7 +417,10 @@ func updateRecordsViaCondition(db *openDB, tableID string, condition *conditionN
 	}
 
 	recordIndexes := make([]int, 0)
-	performForEachRecord(db, tableID, condition, saveIndexCallback, &recordIndexes)
+	err = performForEachRecord(db, tableID, condition, saveIndexCallback, &recordIndexes)
+	if err != nil {
+		return err
+	}
 
 	err = updateRecords(db, *tableHeaders, recordIndexes, update)
 	if err != nil {

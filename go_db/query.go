@@ -18,11 +18,10 @@ const (
 )
 
 type stringSet map[string]interface{}
-type uint32Set map[uint32]interface{}
 
 type selectQuery struct {
-	// The columns asked to retrieve
-	columns uint32Set
+	// The columns asked to retrieve, in the order they've been requested
+	columns []uint32
 	// The table the query should be performed on
 	// TODO: support JOINs(?)
 	tableID string
@@ -130,7 +129,7 @@ func tableIDFromQuery(words []string, wordBefore string) string {
 	return words[tableIDIndex]
 }
 
-func columnNamesFromQuery(words []string) (stringSet, error) {
+func columnNamesFromQuery(words []string) ([]string, error) {
 	if len(words) == 0 {
 		return nil, fmt.Errorf("cannot extract columns from empty query")
 	}
@@ -144,7 +143,7 @@ func columnNamesFromQuery(words []string) (stringSet, error) {
 	}
 
 	// Column names are between the 'select' and the 'from' clauses
-	columnNames := stringSet{}
+	columnNames := make([]string, 0)
 	for i := 1; i < fromIndex; i++ {
 		// Column names should be separated by a comma (',')
 		if i < fromIndex-1 {
@@ -153,7 +152,7 @@ func columnNamesFromQuery(words []string) (stringSet, error) {
 			}
 			words[i] = words[i][:len(words[i])-1]
 		}
-		columnNames[words[i]] = struct{}{}
+		columnNames = append(columnNames, words[i])
 	}
 
 	return columnNames, nil
@@ -168,11 +167,11 @@ func tableColumnNameToIndex(scheme tableScheme) map[string]uint32 {
 }
 
 func columnNamesToColumnIndexes(scheme tableScheme, nameToIndex map[string]uint32,
-	columnNames stringSet) (uint32Set, error) {
-	columnIndexes := uint32Set{}
-	for columnName := range columnNames {
+	columnNames []string) ([]uint32, error) {
+	columnIndexes := make([]uint32, 0)
+	for _, columnName := range columnNames {
 		if index, exists := nameToIndex[columnName]; exists {
-			columnIndexes[index] = struct{}{}
+			columnIndexes = append(columnIndexes, index)
 		} else {
 			return nil, fmt.Errorf("no matching column %s in table", columnName)
 		}

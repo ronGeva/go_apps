@@ -147,7 +147,11 @@ func buildConditionTreeForTest() conditionNode {
 func TestRecordFilter(t *testing.T) {
 	cond := buildConditionTreeForTest()
 	db, tableID := buildTable2()
-	records := filterRecordsFromTable(db, tableID, &cond)
+	records, err := filterRecordsFromTable(db, tableID, &cond)
+	if err != nil {
+		t.Fail()
+	}
+
 	if len(records) != 1 {
 		t.Fail()
 	}
