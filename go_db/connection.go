@@ -76,6 +76,7 @@ func ExecuteUpdateQuery(openDatabase *openDB, cursor *Cursor, sql string) error 
 }
 
 func (cursor *Cursor) Execute(sql string) error {
+	sql = normalizeQuery(sql)
 	queryType, err := parseQueryType(sql)
 	if err != nil {
 		return nil

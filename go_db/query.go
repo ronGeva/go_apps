@@ -420,7 +420,6 @@ func parseWhereStatementInQuery(db *openDB, sql string, tableID string) (*condit
 }
 
 func parseSelectQuery(db *openDB, sql string) (*selectQuery, error) {
-	sql = strings.ToLower(sql) // normalize query by lowering it
 	words := strings.FieldsFunc(sql, isWhitespace)
 	tableID := tableIDFromQuery(words, "from")
 	tablePointer, err := findTable(db, tableID)
@@ -471,7 +470,8 @@ func valuesTupleIntoRecord(values []string, scheme tableScheme) (*Record, error)
 	}
 	fields := make([]Field, 0)
 	for i := range values {
-		field, err := STRING_TO_FIELD_FUNCS[scheme.columns[i].columnType](values[i])
+		trimmedVal := strings.Trim(values[i], " \t\r\n")
+		field, err := STRING_TO_FIELD_FUNCS[scheme.columns[i].columnType](trimmedVal)
 		if err != nil {
 			return nil, err
 		}
@@ -521,7 +521,6 @@ func parseInsertQueryValues(sql string, scheme tableScheme) ([]Record, error) {
 }
 
 func parseInsertQuery(db *openDB, sql string) (*insertQuery, error) {
-	sql = strings.ToLower(sql) // normalize query by lowering it
 	words := strings.FieldsFunc(sql, isWhitespace)
 	tableID := tableIDFromQuery(words, "into")
 	tablePointer, err := findTable(db, tableID)
@@ -539,7 +538,6 @@ func parseInsertQuery(db *openDB, sql string) (*insertQuery, error) {
 
 // TODO: remove code duplication between this functon and parseInsertQuery
 func parseDeleteQuery(db *openDB, sql string) (*deleteQuery, error) {
-	sql = strings.ToLower(sql) // normalize query by lowering it
 	words := strings.FieldsFunc(sql, isWhitespace)
 	tableID := tableIDFromQuery(words, "from")
 	cond, err := parseWhereStatementInQuery(db, sql, tableID)
@@ -568,7 +566,6 @@ func singleParanthesesInterval(intervals []parenthesesInterval) *parenthesesInte
 }
 
 func parseCreateQuery(db *openDB, sql string) (*createQuery, error) {
-	sql = strings.ToLower(sql) // normalize query by lowering it
 	words := strings.FieldsFunc(sql, isWhitespace)
 	tableID := tableIDFromQuery(words, "table")
 
@@ -650,7 +647,6 @@ func parseUpdateSetStatement(db *openDB, sql string, scheme tableScheme) (*recor
 }
 
 func parseUpdateQuery(db *openDB, sql string) (*updateQuery, error) {
-	sql = strings.ToLower(sql) // normalize query by lowering it
 	words := strings.FieldsFunc(sql, isWhitespace)
 	tableID := tableIDFromQuery(words, "update")
 	cond, err := parseWhereStatementInQuery(db, sql, tableID)
@@ -672,10 +668,18 @@ func parseUpdateQuery(db *openDB, sql string) (*updateQuery, error) {
 }
 
 func parseQueryType(sql string) (queryType, error) {
-	sql = strings.ToLower(sql) // normalize query by lowering it
 	words := strings.FieldsFunc(sql, isWhitespace)
 	if len(words) == 0 {
 		return QueryTypeInvalid, fmt.Errorf("empty query")
 	}
 	return QUERY_TYPE_MAP[words[0]], nil
+}
+
+// Perform normalizations required for any SQL query
+func normalizeQuery(sql string) string {
+	sql = strings.ToLower(sql)
+
+	// Newlines are practically identical to spaces in SQL, and allow us to simplify the query
+	sql = strings.Replace(sql, "\n", " ", -1)
+	return sql
 }
