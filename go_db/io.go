@@ -146,32 +146,34 @@ func readFromDbPointer(db *openDB, pointer dbPointer, size uint32, offset uint32
 
 	data := make([]byte, size)
 	finalReadOffset := size + offset
-	dataBlockSize := db.header.dataBlockSize
+	dataInBlock := db.header.dataBlockSize - 4
 	currentOffset := pointer.offset
+	bytesCopied := uint32(0)
 	// Read all but the last data block (if it is partial)
-	for i := uint32(0); i < finalReadOffset/dataBlockSize; i++ {
+	for i := uint32(0); i < finalReadOffset/dataInBlock; i++ {
 		if currentOffset == 0 {
 			panic(BadReadRequestError{})
 		}
 
 		newData, nextOffset := readDataBlock(db, currentOffset)
 		currentOffset = nextOffset
-		if offset < dataBlockSize-4 {
-			copy(data[i*dataBlockSize:], newData[offset:])
+		if offset < dataInBlock {
+			copy(data[bytesCopied:], newData[offset:])
+			bytesCopied += uint32(len(newData[offset:]))
 			offset = 0
 		} else {
-			offset -= (dataBlockSize - 4)
+			offset -= dataInBlock
 		}
 	}
 
 	// Read the last partial data block (if there is one)
-	if size%dataBlockSize != 0 {
+	if size%dataInBlock != 0 {
 		if currentOffset == 0 {
 			panic(BadReadRequestError{})
 		}
 
 		newData, _ := readDataBlock(db, currentOffset)
-		copy(data[size-(size%dataBlockSize):], newData[offset:])
+		copy(data[bytesCopied:], newData[offset:])
 	}
 	return data
 }
@@ -209,9 +211,9 @@ func getMutableDbPointer(db *openDB, pointerOffset uint32) mutableDbPointer {
 
 func getPointerFinalBlockOffset(db *openDB, pointer dbPointer, offset *uint32) uint32 {
 	currentBlockOffset := pointer.offset
-	for *offset > db.header.dataBlockSize {
+	for *offset > db.header.dataBlockSize-4 {
 		_, currentBlockOffset = readDataBlock(db, currentBlockOffset)
-		*offset -= db.header.dataBlockSize
+		*offset -= (db.header.dataBlockSize - 4)
 	}
 	return currentBlockOffset
 }
@@ -223,9 +225,13 @@ func appendDataToDataBlockImmutablePointer(db *openDB, newData []byte, pointer d
 	offset := pointer.size
 	finalBlockOffset := getPointerFinalBlockOffset(db, pointer, &offset)
 	bytesWritten := 0
+
 	bytesToWrite := min(int(db.header.dataBlockSize-offset-4), len(newData))
-	writeToDB(db, newData[bytesWritten:bytesWritten+int(bytesToWrite)], finalBlockOffset+offset)
-	bytesWritten += int(bytesToWrite)
+	if bytesToWrite > 0 {
+		writeToDB(db, newData[bytesWritten:bytesWritten+int(bytesToWrite)], finalBlockOffset+offset)
+		bytesWritten += int(bytesToWrite)
+	}
+
 	for bytesWritten < len(newData) {
 		// Allocate a new block
 		newBlockPointer := allocateNewDataBlock(db)
@@ -233,7 +239,7 @@ func appendDataToDataBlockImmutablePointer(db *openDB, newData []byte, pointer d
 		writeToDB(db, uint32ToBytes(newBlockPointer.offset), finalBlockOffset+db.header.dataBlockSize-4)
 		// Advance to this new block and continue writing
 		finalBlockOffset = newBlockPointer.offset
-		bytesToWrite = min(int(db.header.dataBlockSize-4), len(newData)-bytesWritten)
+		bytesToWrite := min(int(db.header.dataBlockSize-4), len(newData)-bytesWritten)
 		writeToDB(db, newData[bytesWritten:bytesWritten+bytesToWrite], finalBlockOffset)
 		bytesWritten += bytesToWrite
 	}

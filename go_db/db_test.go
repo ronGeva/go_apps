@@ -144,6 +144,12 @@ func buildConditionTreeForTest() conditionNode {
 	return conditionNode{operator: ConditionOperatorAnd, operands: []*conditionNode{&node1, &node2}}
 }
 
+func buildConditionTreeForTestAbove500OrBelow100() conditionNode {
+	node1 := conditionNode{condition: &condition{0, ConditionTypeGreater, uint32ToBytes(500)}}
+	node2 := conditionNode{condition: &condition{1, ConditionTypeLess, uint32ToBytes(100)}}
+	return conditionNode{operator: ConditionOperatorOr, operands: []*conditionNode{&node1, &node2}}
+}
+
 func TestRecordFilter(t *testing.T) {
 	cond := buildConditionTreeForTest()
 	db, tableID := buildTable2()
@@ -441,6 +447,41 @@ func TestCannotCreateTheSameTableTwice(t *testing.T) {
 	err = writeNewTable(db, tableID, headers.scheme)
 	if err == nil {
 		// This should fail, as we've already created this table
+		t.Fail()
+	}
+}
+
+func TestMapEachRecord(t *testing.T) {
+	db, tableID := buildTable2()
+
+	// Delete all previous records
+	err := deleteRecordsFromTable(db, tableID, nil)
+	if err != nil {
+		t.Fail()
+	}
+
+	for i := 0; i < 1000; i++ {
+		fields := []Field{&IntField{i}, &IntField{i + 5}}
+		record := MakeRecord(fields)
+		addRecordToTable(db, tableID, record)
+	}
+
+	// Sanity
+	records := readAllRecords(db, tableID)
+	if len(records) != 1000 {
+		t.Fail()
+	}
+
+	cond := buildConditionTreeForTestAbove500OrBelow100()
+	openDatabase := getOpenDB(db)
+	buildConditionTreeForTest()
+	output, err := mapEachRecord(&openDatabase, tableID, &cond, mapGetRecords, nil)
+	if err != nil {
+		t.Fail()
+	}
+
+	// check the amount of records we get back is as expected
+	if len(output) != 499+95 {
 		t.Fail()
 	}
 }

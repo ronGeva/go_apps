@@ -222,6 +222,10 @@ func readAllRecords(db database, tableID string) []Record {
 	for i := 0; i < len(recordsData)/sizeOfRecord; i++ {
 		if checkBitFromData(bitmapData, i) {
 			recordData := recordsData[i*sizeOfRecord : (i+1)*sizeOfRecord]
+			if i == 64 {
+				i -= 1
+				i += 1
+			}
 			records = append(records, deserializeRecord(&openDatabse, recordData, tableScheme))
 		}
 	}
@@ -325,6 +329,32 @@ func performForEachRecord[contextType any](openDatabase *openDB, tableID string,
 			if recordsCondition == nil || checkAllConditions(*recordsCondition, record) {
 				callback(record, i, context)
 			}
+		}
+	}
+	return nil
+}
+
+func writeAllRecordsToChannel(openDatabase *openDB, tableID string, recordsCondition *conditionNode,
+	recordsChannel chan<- Record) error {
+	tablePointer, err := findTable(openDatabase, tableID)
+	if err != nil {
+		return err
+	}
+	headers := parseTableHeaders(openDatabase, *tablePointer)
+	if recordsCondition != nil && !validateConditions(headers.scheme, *recordsCondition) {
+		return fmt.Errorf("invalid condition in query")
+	}
+
+	bitmapData := readAllDataFromDbPointer(openDatabase, headers.bitmap.pointer)
+	scheme := headers.scheme
+	recordsPointer := headers.records
+	sizeOfRecord := int(DB_POINTER_SIZE) * len(headers.scheme.columns)
+	for i := 0; i < int(recordsPointer.pointer.size)/sizeOfRecord; i++ {
+		if checkBitFromData(bitmapData, i) {
+			recordData := readFromDbPointer(openDatabase, recordsPointer.pointer, uint32(sizeOfRecord),
+				uint32(sizeOfRecord*i))
+			record := deserializeRecord(openDatabase, recordData, scheme)
+			recordsChannel <- record
 		}
 	}
 	return nil
