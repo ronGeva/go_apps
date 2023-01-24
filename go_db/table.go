@@ -121,13 +121,21 @@ func writeNewTableLocalFile(db database, tableID string, scheme tableScheme) {
 	writeNewTableLocalFileInternal(&openDatabase, tableID, scheme)
 }
 
-func writeNewTable(db database, tableID string, scheme tableScheme) {
+func writeNewTable(db database, tableID string, scheme tableScheme) error {
 	if db.id.ioType != LocalFile {
 		panic(UnsupportedError{})
 	}
-	// TODO: validate no other table exists with this tableID
+	openDatabase := getOpenDB(db)
+	defer closeOpenDB(&openDatabase)
 
-	writeNewTableLocalFile(db, tableID, scheme)
+	_, err := findTable(&openDatabase, tableID)
+	if _, ok := err.(*TableNotFoundError); !ok {
+		return fmt.Errorf("table %s already exists", tableID)
+	}
+
+	writeNewTableLocalFileInternal(&openDatabase, tableID, scheme)
+
+	return nil
 }
 
 func findTable(openDatabse *openDB, tableID string) (*dbPointer, error) {

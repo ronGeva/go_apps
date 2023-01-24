@@ -429,3 +429,19 @@ func TestCursorUpdate1(t *testing.T) {
 		t.Fail()
 	}
 }
+
+func TestCannotCreateTheSameTableTwice(t *testing.T) {
+	db, tableID := buildTable1()
+	openDatabase := getOpenDB(db)
+	headers, err := getTableHeaders(&openDatabase, tableID)
+	closeOpenDB(&openDatabase)
+	if err != nil {
+		t.Fail()
+	}
+
+	err = writeNewTable(db, tableID, headers.scheme)
+	if err == nil {
+		// This should fail, as we've already created this table
+		t.Fail()
+	}
+}
