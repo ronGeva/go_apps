@@ -210,8 +210,7 @@ func TestParseSelectQuery1(t *testing.T) {
 	openDB := getOpenDB(db)
 	defer closeOpenDB(&openDB)
 
-	//sql := "select * from table1\r\n where\t columnA = 5   \r\n "
-	sql := "Select columnA, columnB from newTable where ((columnA = 5) and (columnB = 13)) or ((columnA = 7) and (not (columnB = 30)))"
+	sql := "select columna, columnb from newTable where ((columna = 5) and (columnb = 13)) or ((columna = 7) and (not (columnb = 30)))"
 	_, err := parseSelectQuery(&openDB, sql)
 	if err != nil {
 		t.Fail()
@@ -223,7 +222,7 @@ func TestParseSelectQuery2(t *testing.T) {
 	openDB := getOpenDB(db)
 	defer closeOpenDB(&openDB)
 
-	sql := "Select columnA, columnB from newTable where columnA = 7 and columnb = 13 or columna = 5 and columna = 10 and not columnb = 5"
+	sql := "select columna, columnb from newTable where columna = 7 and columnb = 13 or columna = 5 and columna = 10 and not columnb = 5"
 	_, err := parseSelectQuery(&openDB, sql)
 	if err != nil {
 		t.Fail()

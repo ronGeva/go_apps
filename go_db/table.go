@@ -291,6 +291,7 @@ func getRecordsCallback(record Record, index int, context *getRecordsContext) {
 	if context.requestedColumns == nil {
 		// Just add the record as is
 		context.records = append(context.records, record)
+		return
 	}
 
 	newRecord := Record{}
