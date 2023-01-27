@@ -46,6 +46,11 @@ type recordUpdate struct {
 	changes []recordChange
 }
 
+type recordContext struct {
+	record Record
+	index  uint32
+}
+
 func addNewTableToTablesArray(db *openDB, newTablePointer dbPointer) mutableDbPointer {
 	// Get the table array db pointer
 	tableArrayPointer := getMutableDbPointer(db, TABLES_POINTER_OFFSET)
@@ -233,11 +238,11 @@ func readAllRecords(db database, tableID string) []Record {
 	return records
 }
 
-func deleteRecordInternal(db *openDB, headers tableHeaders, recordIndex int) error {
-	if !checkBit(db, headers.bitmap.pointer, recordIndex) {
+func deleteRecordInternal(db *openDB, headers tableHeaders, recordIndex uint32) error {
+	if !checkBit(db, headers.bitmap.pointer, int(recordIndex)) {
 		return &RecordNotFoundError{}
 	}
-	writeBitToBitmap(db, headers.bitmap.location, uint32(recordIndex), 0)
+	writeBitToBitmap(db, headers.bitmap.location, recordIndex, 0)
 	return nil
 }
 
@@ -251,7 +256,7 @@ func getTableHeaders(db *openDB, tableID string) (*tableHeaders, error) {
 	return &headers, nil
 }
 
-func deleteRecord(db database, tableID string, recordIndex int) error {
+func deleteRecord(db database, tableID string, recordIndex uint32) error {
 	openDatabse := getOpenDB(db)
 	defer closeOpenDB(&openDatabse)
 
@@ -282,60 +287,8 @@ func validateConditions(scheme tableScheme, recordsCondition conditionNode) bool
 	}
 }
 
-type getRecordsContext struct {
-	records          []Record
-	requestedColumns []uint32
-}
-
-func getRecordsCallback(record Record, index int, context *getRecordsContext) {
-	if context == nil {
-		return
-	}
-
-	if context.requestedColumns == nil {
-		// Just add the record as is
-		context.records = append(context.records, record)
-		return
-	}
-
-	newRecord := Record{}
-	for _, index := range context.requestedColumns {
-		newRecord.Fields = append(newRecord.Fields, record.Fields[index])
-	}
-
-	context.records = append(context.records, newRecord)
-}
-
-func performForEachRecord[contextType any](openDatabase *openDB, tableID string, recordsCondition *conditionNode,
-	callback recordsCallbackFunc[contextType], context contextType) error {
-	tablePointer, err := findTable(openDatabase, tableID)
-	if err != nil {
-		return err
-	}
-	headers := parseTableHeaders(openDatabase, *tablePointer)
-	if recordsCondition != nil && !validateConditions(headers.scheme, *recordsCondition) {
-		return fmt.Errorf("invalid condition in query")
-	}
-
-	bitmapData := readAllDataFromDbPointer(openDatabase, headers.bitmap.pointer)
-	scheme := headers.scheme
-	recordsPointer := headers.records
-	sizeOfRecord := int(DB_POINTER_SIZE) * len(headers.scheme.columns)
-	for i := 0; i < int(recordsPointer.pointer.size)/sizeOfRecord; i++ {
-		if checkBitFromData(bitmapData, i) {
-			recordData := readFromDbPointer(openDatabase, recordsPointer.pointer, uint32(sizeOfRecord),
-				uint32(sizeOfRecord*i))
-			record := deserializeRecord(openDatabase, recordData, scheme)
-			if recordsCondition == nil || checkAllConditions(*recordsCondition, record) {
-				callback(record, i, context)
-			}
-		}
-	}
-	return nil
-}
-
 func writeAllRecordsToChannel(openDatabase *openDB, tableID string, recordsCondition *conditionNode,
-	recordsChannel chan<- Record) error {
+	recordsChannel chan<- recordContext) error {
 	tablePointer, err := findTable(openDatabase, tableID)
 	if err != nil {
 		return err
@@ -354,29 +307,23 @@ func writeAllRecordsToChannel(openDatabase *openDB, tableID string, recordsCondi
 			recordData := readFromDbPointer(openDatabase, recordsPointer.pointer, uint32(sizeOfRecord),
 				uint32(sizeOfRecord*i))
 			record := deserializeRecord(openDatabase, recordData, scheme)
-			recordsChannel <- record
+			recordsChannel <- recordContext{record: record, index: uint32(i)}
 		}
 	}
 	return nil
 }
 
 func filterRecordsFromTableInternal(openDatabase *openDB, tableID string, recordsCondition *conditionNode, columns []uint32) ([]Record, error) {
-	context := getRecordsContext{records: make([]Record, 0), requestedColumns: columns}
-	err := performForEachRecord(openDatabase, tableID, recordsCondition, getRecordsCallback, &context)
+	records, err := mapEachRecord(openDatabase, tableID, recordsCondition, mapGetRecords, columns)
 	if err != nil {
 		return nil, err
 	}
 
-	return context.records, nil
-}
-
-func saveIndexCallback(record Record, index int, context *[]int) {
-	*context = append(*context, index)
+	return records, nil
 }
 
 func deleteRecordsFromTableInternal(db *openDB, tableID string, recordsCondition *conditionNode) error {
-	recordsToDelete := make([]int, 0)
-	err := performForEachRecord(db, tableID, recordsCondition, saveIndexCallback, &recordsToDelete)
+	recordsToDelete, err := mapEachRecord(db, tableID, recordsCondition, mapGetRecordIndexes, nil)
 	if err != nil {
 		return err
 	}
@@ -439,9 +386,9 @@ func updateRecord(db *openDB, headers tableHeaders, recordIndex int, update reco
 	return nil
 }
 
-func updateRecords(db *openDB, headers tableHeaders, recordIndexes []int, update recordUpdate) error {
+func updateRecords(db *openDB, headers tableHeaders, recordIndexes []uint32, update recordUpdate) error {
 	for _, recordIndex := range recordIndexes {
-		err := updateRecord(db, headers, recordIndex, update)
+		err := updateRecord(db, headers, int(recordIndex), update)
 		if err != nil {
 			return err
 		}
@@ -455,8 +402,7 @@ func updateRecordsViaCondition(db *openDB, tableID string, condition *conditionN
 		return err
 	}
 
-	recordIndexes := make([]int, 0)
-	err = performForEachRecord(db, tableID, condition, saveIndexCallback, &recordIndexes)
+	recordIndexes, err := mapEachRecord(db, tableID, condition, mapGetRecordIndexes, nil)
 	if err != nil {
 		return err
 	}

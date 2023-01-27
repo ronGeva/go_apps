@@ -4,26 +4,27 @@ This module contains logic related to iteration of records in a table.
 
 package go_db
 
-type mapFunctionType[outputType any, mapInput any] func(record Record, input mapInput) outputType
+type mapFunctionType[outputType any, mapInput any] func(context recordContext, input mapInput) outputType
 
-func filterRecordsWorker[outputType any, mapInput any](recordsChannel <-chan Record,
+func filterRecordsWorker[outputType any, mapInput any](recordsChannel <-chan recordContext,
 	mapFunction mapFunctionType[outputType, mapInput], cond *conditionNode, outChannel chan<- outputType,
 	input mapInput) {
 	for {
-		record, ok := <-recordsChannel
+		context, ok := <-recordsChannel
 		if !ok {
 			// Done
 			return
 		}
 
-		if cond == nil || checkAllConditions(*cond, record) {
-			output := mapFunction(record, input)
+		if cond == nil || checkAllConditions(*cond, context.record) {
+			output := mapFunction(context, input)
 			outChannel <- output
 		}
 	}
 }
 
-func mapGetRecords(record Record, requestedColumns []uint32) Record {
+func mapGetRecords(context recordContext, requestedColumns []uint32) Record {
+	record := context.record
 	if requestedColumns == nil {
 		return record
 	}
@@ -34,6 +35,10 @@ func mapGetRecords(record Record, requestedColumns []uint32) Record {
 	}
 
 	return newRecord
+}
+
+func mapGetRecordIndexes(context recordContext, unused interface{}) uint32 {
+	return context.index
 }
 
 func waitForWorkers[outputType any](outChannel <-chan outputType, doneChannel <-chan bool, numOfWorkers uint32) []outputType {
@@ -66,7 +71,7 @@ func mapEachRecord[outputType any, mapInputType any](openDatabase *openDB, table
 	recordsCondition *conditionNode, mapFunction mapFunctionType[outputType, mapInputType],
 	mapInput mapInputType) ([]outputType,
 	error) {
-	recordsChannel := make(chan Record, 1000)
+	recordsChannel := make(chan recordContext, 1000)
 	outChannel := make(chan outputType, 1000)
 	const numOfWorkers = 5
 	doneChannel := make(chan bool, numOfWorkers)
