@@ -518,3 +518,32 @@ func TestMapEachRecord(t *testing.T) {
 		t.Fail()
 	}
 }
+
+func TestAddAlotOfRecords1(t *testing.T) {
+	db, tableID := buildTable1()
+
+	// Delete all previous records
+	err := deleteRecordsFromTable(db, tableID, nil)
+	if err != nil {
+		t.Fail()
+	}
+
+	for i := 0; i < 10000; i++ {
+		fields := []Field{&IntField{i}, &BlobField{[]byte{1, 2, 3, 4, 5}}}
+		record := MakeRecord(fields)
+		addRecordToTable(db, tableID, record)
+	}
+
+	// Sanity
+	records := readAllRecords(db, tableID)
+	if len(records) != 10000 {
+		t.Fail()
+	}
+
+	for i := range records {
+		if !areRecordsEqual(
+			records[i], Record{[]Field{&IntField{i}, &BlobField{[]byte{1, 2, 3, 4, 5}}}}) {
+			t.Fail()
+		}
+	}
+}

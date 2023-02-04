@@ -165,7 +165,7 @@ func writeRecordToTable(db *openDB, headers tableHeaders, recordIndex uint32, da
 	prevAmountOfRecords := recordsPointer.pointer.size / (DB_POINTER_SIZE * uint32(len(headers.scheme.columns)))
 	if prevAmountOfRecords > recordIndex {
 		// Override pre-existing invalid record
-		offset := DB_POINTER_SIZE * recordIndex
+		offset := DB_POINTER_SIZE * uint32(len(headers.scheme.columns)) * recordIndex
 		writeToDataBlock(db, recordsPointer.pointer, data, uint32(offset))
 	} else {
 		// Write a new record
