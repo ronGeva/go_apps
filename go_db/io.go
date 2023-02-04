@@ -50,6 +50,8 @@ type openDB struct {
 	header dbHeader
 }
 
+type allocationFuncType func(*openDB) dbPointer
+
 // DB IO utils
 
 func uint32ToBytes(num uint32) []byte {
@@ -221,7 +223,8 @@ func getPointerFinalBlockOffset(db *openDB, pointer dbPointer, offset *uint32) u
 // Appends the data to the data block without changing the pointer
 // Can be used when another component is responsible for changing the pointer's
 // value, such as when the pointer is only in memory and isn't present on disk.
-func appendDataToDataBlockImmutablePointer(db *openDB, newData []byte, pointer dbPointer) int64 {
+func appendDataToDataBlockImmutablePointerInternal(db *openDB, newData []byte, pointer dbPointer,
+	allocationFunc allocationFuncType) int64 {
 	offset := pointer.size
 	finalBlockOffset := getPointerFinalBlockOffset(db, pointer, &offset)
 	bytesWritten := 0
@@ -234,7 +237,7 @@ func appendDataToDataBlockImmutablePointer(db *openDB, newData []byte, pointer d
 
 	for bytesWritten < len(newData) {
 		// Allocate a new block
-		newBlockPointer := allocateNewDataBlock(db)
+		newBlockPointer := allocationFunc(db)
 		// Write its offset to the end of the current block
 		writeToDB(db, uint32ToBytes(newBlockPointer.offset), finalBlockOffset+db.header.dataBlockSize-4)
 		// Advance to this new block and continue writing
@@ -251,9 +254,14 @@ func appendDataToDataBlockImmutablePointer(db *openDB, newData []byte, pointer d
 	return finalOffset
 }
 
+func appendDataToDataBlockImmutablePointer(db *openDB, newData []byte, pointer dbPointer) int64 {
+	return appendDataToDataBlockImmutablePointerInternal(db, newData, pointer, allocateNewDataBlock)
+}
+
 // pointerOffset is the offset of the data block pointer in the file
 // returns the absolute offset in the file in which the write has ended.
-func appendDataToDataBlock(db *openDB, newData []byte, pointerOffset uint32) int64 {
+func appendDataToDataBlockInternal(db *openDB, newData []byte, pointerOffset uint32,
+	allocationFunc allocationFuncType) int64 {
 	db.f.Seek(int64(pointerOffset), 0)
 	pointerData := make([]byte, DB_POINTER_SIZE)
 	sizeRead, err := db.f.Read(pointerData)
@@ -268,7 +276,15 @@ func appendDataToDataBlock(db *openDB, newData []byte, pointerOffset uint32) int
 	db.f.Seek(int64(pointerOffset)+4, 0) // go the location of the pointer's size
 	db.f.Write(newSizeData)
 
-	return appendDataToDataBlockImmutablePointer(db, newData, previousPointer)
+	return appendDataToDataBlockImmutablePointerInternal(db, newData, previousPointer, allocationFunc)
+}
+
+func appendDataToBlockBitmap(db *openDB, newData []byte) int64 {
+	return appendDataToDataBlockInternal(db, newData, DATABLOCK_BITMAP_POINTER_OFFSET, allocateNewDataEndOfDB)
+}
+
+func appendDataToDataBlock(db *openDB, newData []byte, pointerOffset uint32) int64 {
+	return appendDataToDataBlockInternal(db, newData, pointerOffset, allocateNewDataBlock)
 }
 
 func min(a int, b int) int {

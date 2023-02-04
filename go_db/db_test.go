@@ -451,6 +451,39 @@ func TestCannotCreateTheSameTableTwice(t *testing.T) {
 	}
 }
 
+// Add enough data blocks to the database to make the free block bitmap to expand.
+// Make sure the bitmap is in the exact size we'd expect it to be
+func TestBitmapExpansion(t *testing.T) {
+	db, _ := initializeTestDB1()
+	ALREADY_USED_DATA_BLOCKS := 3
+	openDatabase := getOpenDB(db)
+	BLOCKS_TO_ADD := (int(openDatabase.header.dataBlockSize)-4)*8 - ALREADY_USED_DATA_BLOCKS
+
+	for i := 0; i < BLOCKS_TO_ADD; i++ {
+		allocateNewDataBlock(&openDatabase)
+	}
+
+	allocateNewDataBlock(&openDatabase)
+
+	bitmapData := readAllDataFromDbPointer(&openDatabase, openDatabase.header.bitmapPointer)
+	if len(bitmapData) != (int(openDatabase.header.dataBlockSize)-4)+1 {
+		t.Fail()
+	}
+	for _, b := range bitmapData[:(int(openDatabase.header.dataBlockSize) - 4)] {
+		// All bytes but the last should be all ones
+		if b != 0xff {
+			t.Fail()
+		}
+	}
+	if bitmapData[(int(openDatabase.header.dataBlockSize)-4)] != 0x3 {
+		// We add one additional datablock after there's no more room left in the first datablock
+		// of the free block bitmap. This should cause two additional blocks to be created:
+		// The first is for the free blocks bitmap itself
+		// The second is the block we've requested to add
+		t.Fail()
+	}
+}
+
 func TestMapEachRecord(t *testing.T) {
 	db, tableID := buildTable2()
 

@@ -52,9 +52,37 @@ func writeBitToBitmap(db *openDB, bitmapPointerOffset int64, index uint32, newVa
 	writeToDataBlock(db, bitmapPointer.pointer, []byte{changedByte}, index/8)
 }
 
+func writeZeroBuffer(db *openDB) {
+	zeroesBuffer := make([]byte, db.header.dataBlockSize) // TODO: validate these are all zeroes
+	n, err := db.f.Write(zeroesBuffer)
+	check(err)
+	assert(n == int(db.header.dataBlockSize), "Failed to write new data block")
+}
+
+func allocateNewDataEndOfDB(db *openDB) dbPointer {
+	newBlockOffset, err := db.f.Seek(0, 2)
+	check(err)
+	assert(newBlockOffset%int64(db.header.dataBlockSize) == 0, "unaligned db size")
+	writeZeroBuffer(db)
+	return dbPointer{offset: uint32(newBlockOffset), size: 0}
+}
+
 func allocateNewDataBlock(db *openDB) dbPointer {
 	blockBitmap := readAllDataFromDbPointer(db, db.header.bitmapPointer)
 	blockIndex := findFirstAvailableBlock(blockBitmap)
+	if blockIndex >= db.header.bitmapPointer.size*8 {
+		// Do we need to add another datablock to the bitmap itself?
+		if (blockIndex/8)%(db.header.dataBlockSize-4) == 0 {
+			// Add the new datablock of the bitmap, use the first bit in it to signal
+			// it is taken.
+			buffer := []byte{1}
+			appendDataToBlockBitmap(db, buffer)
+			blockIndex++ // we cannot use this block, use the next one
+		}
+		// Mark the bitmap pointer as one byte bigger for future usage
+		db.header.bitmapPointer.size++
+	}
+
 	writeBitToBitmap(db, int64(DATABLOCK_BITMAP_POINTER_OFFSET), blockIndex, 1)
 	// Now add the actual data block to the file
 	blockOffset := int64(blockIndex) * int64(db.header.dataBlockSize)
