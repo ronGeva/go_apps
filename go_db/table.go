@@ -227,10 +227,6 @@ func readAllRecords(db database, tableID string) []Record {
 	for i := 0; i < len(recordsData)/sizeOfRecord; i++ {
 		if checkBitFromData(bitmapData, i) {
 			recordData := recordsData[i*sizeOfRecord : (i+1)*sizeOfRecord]
-			if i == 64 {
-				i -= 1
-				i += 1
-			}
 			records = append(records, deserializeRecord(&openDatabse, recordData, tableScheme))
 		}
 	}
