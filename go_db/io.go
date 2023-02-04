@@ -291,7 +291,7 @@ func writeToDataBlock(db *openDB, pointer dbPointer, data []byte, offset uint32)
 	offsetInWriteBuffer := 0
 	for offsetInWriteBuffer < len(data) {
 		db.f.Seek(int64(currentBlockOffset)+int64(offset), 0)
-		sizeToWrite := min(int(db.header.dataBlockSize-offset), len(data)-offsetInWriteBuffer)
+		sizeToWrite := min(int(db.header.dataBlockSize-4-offset), len(data)-offsetInWriteBuffer)
 		offset = 0 // from now on we will always write to the start of the blocks
 
 		n, err := db.f.Write(data[offsetInWriteBuffer : offsetInWriteBuffer+int(sizeToWrite)])
