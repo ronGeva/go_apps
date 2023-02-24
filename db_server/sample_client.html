@@ -4,13 +4,15 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta http-equiv="X-UA-Compatible" content="ie=edge" />
-    <title>Go WebSocket Tutorial</title>
+    <title>Go DB</title>
   </head>
   <body>
     <link href="assets/bootstrap/css/bootstrap.min.css" rel="stylesheet">
+    <link href="assets/main.css" rel="stylesheet">
     <script src="assets/bootstrap/js/bootstrap.bundle.min.js"></script>
+    <script src="assets/main.js"></script>
 
-    <h2>Sample DB UI</h2>
+  <div class="bordered_div">
     <h3>Query an existing DB</h3>
     <br/>
 
@@ -19,54 +21,17 @@
       query: <textarea id="query"></textarea>
     </p>
     <button onclick="SendQuery()">send</button> <br/>
-
+  </div>
+  <div>
+    <h3>Query results</h3>
+    <table id="results_table" class="table"></table>
+  </div>
+  <div class="bordered_div">
     <p>
       <h3>Create new db</h3>
       path: <input type="text" id="dbPath"/>
       <button onclick="CreateTable()">create</button>
     </p>
-
-    <script>
-        let socket = new WebSocket("ws://127.0.0.1:5678/ws");
-        console.log("Attempting Connection...");
-
-        socket.onopen = () => {
-            console.log("Successfully Connected");
-        };
-        
-        socket.onclose = event => {
-            console.log("Socket Closed Connection: ", event);
-        };
-
-        socket.onerror = error => {
-            console.log("Socket Error: ", error);
-        };
-
-        socket.onmessage = msg => {
-          console.log(msg);
-          let res = JSON.parse(msg.data);
-          if ("Success" in res) {
-            if (!res["Success"]) {
-              console.log(res["Error"])
-            } else {
-              console.log(res["Data"])
-            }
-          }
-        }
-
-        function SendQuery() {
-            let dbName = document.getElementById("db").value;
-            let query = document.getElementById("query").value;
-            let message = {"type": "query", "db": dbName, "query": query};
-            socket.send(JSON.stringify(message))
-        }
-
-        function CreateTable() {
-          let dbPath = document.getElementById("dbPath").value;
-          let message = {"type": "create", "db": dbPath};
-          socket.send(JSON.stringify(message));
-        }
-
-    </script>
+  </div>
   </body>
 </html>
