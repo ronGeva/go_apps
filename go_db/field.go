@@ -6,6 +6,7 @@ package go_db
 import (
 	"encoding/binary"
 	"encoding/hex"
+	"fmt"
 	"strconv"
 	"strings"
 )
@@ -19,18 +20,21 @@ const (
 )
 
 var FIELD_TYPE_SERIALIZATION = map[FieldType]func([]byte) Field{
-	FieldTypeInt:  deserializeIntField,
-	FieldTypeBlob: deserializeBlobField,
+	FieldTypeInt:    deserializeIntField,
+	FieldTypeBlob:   deserializeBlobField,
+	FieldTypeString: deserializeStringField,
 }
 
 var FIELD_TYPE_QUERY_VALUE_PARSE = map[FieldType]func(string) ([]byte, error){
-	FieldTypeInt:  intQueryValueParse,
-	FieldTypeBlob: blobQueryValueParse,
+	FieldTypeInt:    intQueryValueParse,
+	FieldTypeBlob:   blobQueryValueParse,
+	FieldTypeString: stringQueryValueParse,
 }
 
 var STRING_TO_FIELD_FUNCS = map[FieldType]func(string) (Field, error){
-	FieldTypeInt:  stringToIntField,
-	FieldTypeBlob: stringToBlobField,
+	FieldTypeInt:    stringToIntField,
+	FieldTypeBlob:   stringToBlobField,
+	FieldTypeString: stringToStringField,
 }
 
 var FIELD_STRING_TO_TYPE = map[string]FieldType{
@@ -124,4 +128,53 @@ func (field BlobField) Stringify() string {
 
 func deserializeBlobField(data []byte) Field {
 	return BlobField{Data: data}
+}
+
+type StringField struct {
+	Value string
+}
+
+func (field StringField) getType() FieldType {
+	return FieldTypeString
+}
+
+func (field StringField) serialize() []byte {
+	return []byte(field.Value)
+}
+
+func (field StringField) Stringify() string {
+	return field.Value
+}
+
+func deserializeStringField(data []byte) Field {
+	return StringField{string(data)}
+}
+
+func stringFromStringLiteral(data string) (*string, error) {
+	// Make sure the data starts and ends with a quotation marks
+	if len(data) < 2 || data[0] != '"' || data[len(data)-1] != '"' {
+		return nil, fmt.Errorf("invalid string literal %s", data)
+	}
+
+	// remove quotation marks
+	res := data[1 : len(data)-1]
+	return &res, nil
+}
+
+func stringToStringField(data string) (Field, error) {
+	str, err := stringFromStringLiteral(data)
+	if err != nil {
+		return nil, err
+	}
+
+	return StringField{Value: *str}, nil
+}
+
+func stringQueryValueParse(data string) ([]byte, error) {
+	str, err := stringFromStringLiteral(data)
+	if err != nil {
+		return nil, err
+	}
+
+	return []byte(*str), nil
 }

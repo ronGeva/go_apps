@@ -547,3 +547,31 @@ func TestAddAlotOfRecords1(t *testing.T) {
 		}
 	}
 }
+
+func TestStringField(t *testing.T) {
+	db, tableID := initializeTestDB1()
+	firstColumn := columndHeader{"stringColumn1", FieldTypeString}
+	secondColumn := columndHeader{"stringColumn2", FieldTypeString}
+	scheme := tableScheme{[]columndHeader{firstColumn, secondColumn}}
+	writeNewTable(db, tableID, scheme)
+
+	record1 := Record{[]Field{StringField{"Hello world"}, StringField{"goodbye world"}}}
+	record2 := Record{[]Field{StringField{"A string"}, StringField{"another string"}}}
+	record3 := Record{[]Field{StringField{"Final record"}, StringField{"This is a record"}}}
+	recordsToAdd := []Record{record1, record2, record3}
+	for i := 0; i < len(recordsToAdd); i++ {
+		addRecordToTable(db, tableID, recordsToAdd[i])
+	}
+
+	records := readAllRecords(db, tableID)
+	// Sanity
+	if len(records) != len(recordsToAdd) {
+		t.Fail()
+	}
+
+	for i := 0; i < len(recordsToAdd); i++ {
+		if !areRecordsEqual(records[i], recordsToAdd[i]) {
+			t.Fail()
+		}
+	}
+}
