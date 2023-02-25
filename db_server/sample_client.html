@@ -16,9 +16,10 @@
     <h3>Query an existing DB</h3>
     <br/>
 
-    db: <input type="text" id="db"/> <br/>
+    db: <input list="db_options" id="db" onclick="QueryExistingDBs()">
+    <datalist id="db_options"></datalist> <br/>
     <p>
-      query: <textarea id="query"></textarea>
+      query: <textarea id="query" class="form-control"></textarea>
     </p>
     <button onclick="SendQuery()">send</button> <br/>
   </div>

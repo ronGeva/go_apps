@@ -2,9 +2,13 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
+	"os"
+	"path"
+	"strings"
 
 	"github.com/ronGeva/go_apps/go_db"
 
@@ -20,14 +24,19 @@ var upgrader = websocket.Upgrader{
 }
 
 type queryResult struct {
-	records []go_db.Record
+	records    []go_db.Record
+	resultType string
 }
 
 type queryResponse struct {
 	Success bool
 	Error   string
+	Type    string
 	Data    [][]string
 }
+
+// TODO: make this configurable
+const DB_DIRECTORY = "C:\\temp\\db_directory"
 
 func getStringValue(msg map[string]interface{}, key string) (*string, error) {
 	v, ok := msg[key]
@@ -58,11 +67,24 @@ func performRequest(db string, query string) ([]go_db.Record, error) {
 	return cursor.FetchAll(), nil
 }
 
+func handleQueryDBsRequest(msg map[string]interface{}) (*queryResult, error) {
+	entries, err := os.ReadDir(DB_DIRECTORY)
+	if err != nil {
+		return nil, err
+	}
+	records := make([]go_db.Record, 0)
+	for _, e := range entries {
+		records = append(records, go_db.Record{[]go_db.Field{go_db.StringField{e.Name()}}})
+	}
+	return &queryResult{records: records, resultType: "DBs"}, nil
+}
+
 func handleQueryRequest(msg map[string]interface{}) (*queryResult, error) {
 	db, err := getStringValue(msg, "db")
 	if err != nil {
 		return nil, err
 	}
+	*db = path.Join(DB_DIRECTORY, *db)
 	query, err := getStringValue(msg, "query")
 	if err != nil {
 		return nil, err
@@ -71,16 +93,26 @@ func handleQueryRequest(msg map[string]interface{}) (*queryResult, error) {
 	log.Printf("db=%s, query=%s", *db, *query)
 	records, err := performRequest(*db, *query)
 
-	return &queryResult{records: records}, err
+	return &queryResult{records: records, resultType: "query"}, err
 }
 
 func handleCreationRequest(msg map[string]interface{}) (*queryResult, error) {
-	dbPath, err := getStringValue(msg, "db")
+	dbName, err := getStringValue(msg, "db")
 	if err != nil {
 		return nil, err
 	}
-	go_db.InitializeDB(*dbPath)
-	return nil, nil
+
+	if strings.Contains(*dbName, "\\") {
+		return nil, fmt.Errorf("db name includes invalid character \\: %s", *dbName)
+	}
+
+	dbPath := path.Join(DB_DIRECTORY, *dbName)
+	if _, err := os.Stat(dbPath); !errors.Is(err, os.ErrNotExist) {
+		return nil, fmt.Errorf("db file with name %s already exists", *dbName)
+	}
+
+	go_db.InitializeDB(dbPath)
+	return &queryResult{resultType: "DBCreation"}, nil
 }
 
 func handleNewMessage(conn *websocket.Conn) (*queryResult, error) {
@@ -108,6 +140,8 @@ func handleNewMessage(conn *websocket.Conn) (*queryResult, error) {
 		return handleCreationRequest(msg)
 	case "query":
 		return handleQueryRequest(msg)
+	case "queryDBs":
+		return handleQueryDBsRequest(msg)
 	default:
 		return nil, fmt.Errorf("invalid request type %s", *msgType)
 	}
@@ -118,6 +152,8 @@ func sendResult(conn *websocket.Conn, err error, res *queryResult) {
 	result.Success = (err == nil)
 	if result.Success {
 		if res != nil {
+			result.Type = res.resultType
+
 			allRecordsStr := make([][]string, 0)
 			for _, record := range res.records {
 				recordStr := make([]string, 0)

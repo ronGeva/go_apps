@@ -26,6 +26,11 @@ function CreateTable() {
   socket.send(JSON.stringify(message));
 }
 
+function QueryExistingDBs() {
+    let message = {"type": "queryDBs"};
+    socket.send(JSON.stringify(message))
+}
+
 function PrintResultsTable(data) {
     let table = document.getElementById("results_table")
     table.innerHTML = ""
@@ -38,14 +43,41 @@ function PrintResultsTable(data) {
     }
 }
 
+function ShowDBs(DBList) {
+    dbDataList = document.getElementById("db_options")
+    // clear existing list
+    dbDataList.innerHTML = ""
+
+    for (let index = 0; index < DBList.length; index++) {
+        let option = document.createElement("option")
+        option.value = DBList[index][0]
+        dbDataList.appendChild(option)
+    }
+}
+
+function HandleSuccessfulMessage(res) {
+    if (res["Type"] == "query") {
+        PrintResultsTable(res["Data"])
+        return
+    }
+    if (res["Type"] == "DBs") {
+        ShowDBs(res["Data"])
+        return
+    }
+    if (res["Type"] == "DBCreation") {
+        // Do nothing
+        return
+    }
+    console.error("faulty message: ", res)
+}
+
 function HandleMessage(msg) {
     let res = JSON.parse(msg.data);
     if ("Success" in res) {
       if (!res["Success"]) {
         console.log(res["Error"])
       } else {
-        console.log(res["Data"])
-        PrintResultsTable(res["Data"])
+        HandleSuccessfulMessage(res)
       }
     }
 }
