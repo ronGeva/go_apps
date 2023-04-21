@@ -27,6 +27,9 @@ type selectQuery struct {
 	tableID string
 	// The conditions relevant for this query
 	condition *conditionNode
+
+	// an optional uint32 that marks the column used to sort the result
+	orderBy *uint32
 }
 
 type insertQuery struct {
@@ -113,6 +116,10 @@ func nullifyWhitespaceCharacter(r rune) rune {
 
 func removeWhitespaces(str string) string {
 	return strings.Map(nullifyWhitespaceCharacter, str)
+}
+
+func stringToWords(str string) []string {
+	return strings.FieldsFunc(str, isWhitespace)
 }
 
 func tableIDFromQuery(words []string, wordBefore string) string {
@@ -392,6 +399,20 @@ func parseCondition(sql string, nameToIndex map[string]uint32, scheme tableSchem
 	return node, nil
 }
 
+// Finds the index of the end of the where statement in an SQL query
+func endOfWhereStatement(sql string) int {
+	// Go through all possible successors to the "where" statement
+
+	// order by
+	orderByIndex := strings.Index(sql, "order by")
+	if orderByIndex != -1 {
+		return orderByIndex
+	}
+
+	// no successor was found, return the end of the query
+	return len(sql)
+}
+
 func parseWhereStatement(sql string, nameToIndex map[string]uint32,
 	scheme tableScheme) (*conditionNode, error) {
 	whereIndex := strings.Index(sql, "where")
@@ -399,8 +420,10 @@ func parseWhereStatement(sql string, nameToIndex map[string]uint32,
 		return nil, nil
 	}
 
+	whereStatementEnd := endOfWhereStatement(sql)
+
 	// TODO: handle queries with something after the condition
-	whereStatement := sql[whereIndex+len("where"):]
+	whereStatement := sql[whereIndex+len("where") : whereStatementEnd]
 	node, err := parseCondition(whereStatement, nameToIndex, scheme, 0, len(whereStatement))
 	if err != nil {
 		return nil, err
@@ -418,8 +441,31 @@ func parseWhereStatementInQuery(db *openDB, sql string, tableID string) (*condit
 	return parseWhereStatement(sql, nameToIndex, tableHeaders.scheme)
 }
 
+func parseOrderByStatement(sql string, columnNameToIndex map[string]uint32) (*uint32, error) {
+	orderByIndex := strings.Index(sql, "order by")
+	if orderByIndex == -1 {
+		// No order by is present in query
+		return nil, nil
+	}
+
+	// TODO: handle other statements after "order by"
+	orderByStatement := sql[orderByIndex+len("order by"):]
+	orderByWords := stringToWords(orderByStatement)
+	if len(orderByWords) != 1 {
+		return nil, fmt.Errorf("invalid 'order by' statement %s", orderByStatement)
+	}
+
+	columnName := orderByWords[0]
+
+	if index, exists := columnNameToIndex[columnName]; exists {
+		return &index, nil
+	} else {
+		return nil, fmt.Errorf("invalid column name %s", columnName)
+	}
+}
+
 func parseSelectQuery(db *openDB, sql string) (*selectQuery, error) {
-	words := strings.FieldsFunc(sql, isWhitespace)
+	words := stringToWords(sql)
 	tableID := tableIDFromQuery(words, "from")
 	tablePointer, err := findTable(db, tableID)
 	if err != nil {
@@ -440,7 +486,12 @@ func parseSelectQuery(db *openDB, sql string) (*selectQuery, error) {
 		return nil, err
 	}
 
-	return &selectQuery{columns: columnIndexes, tableID: tableID, condition: cond}, nil
+	orderBy, err := parseOrderByStatement(sql, nameToIndex)
+	if err != nil {
+		return nil, err
+	}
+
+	return &selectQuery{columns: columnIndexes, tableID: tableID, condition: cond, orderBy: orderBy}, nil
 }
 
 func parseSingleValuesTuple(statement string, index *int) ([]string, error) {
@@ -520,7 +571,7 @@ func parseInsertQueryValues(sql string, scheme tableScheme) ([]Record, error) {
 }
 
 func parseInsertQuery(db *openDB, sql string) (*insertQuery, error) {
-	words := strings.FieldsFunc(sql, isWhitespace)
+	words := stringToWords(sql)
 	tableID := tableIDFromQuery(words, "into")
 	tablePointer, err := findTable(db, tableID)
 	if err != nil {
@@ -537,7 +588,7 @@ func parseInsertQuery(db *openDB, sql string) (*insertQuery, error) {
 
 // TODO: remove code duplication between this functon and parseInsertQuery
 func parseDeleteQuery(db *openDB, sql string) (*deleteQuery, error) {
-	words := strings.FieldsFunc(sql, isWhitespace)
+	words := stringToWords(sql)
 	tableID := tableIDFromQuery(words, "from")
 	cond, err := parseWhereStatementInQuery(db, sql, tableID)
 	if err != nil {
@@ -565,7 +616,7 @@ func singleParanthesesInterval(intervals []parenthesesInterval) *parenthesesInte
 }
 
 func parseCreateQuery(db *openDB, sql string) (*createQuery, error) {
-	words := strings.FieldsFunc(sql, isWhitespace)
+	words := stringToWords(sql)
 	tableID := tableIDFromQuery(words, "table")
 
 	intervals, err := divideStatementByParentheses(sql, 0, len(sql))
@@ -582,7 +633,7 @@ func parseCreateQuery(db *openDB, sql string) (*createQuery, error) {
 	headerStrings := strings.Split(headersStatemt, ",")
 	headers := make([]columndHeader, 0)
 	for _, headerString := range headerStrings {
-		headerWords := strings.FieldsFunc(headerString, isWhitespace)
+		headerWords := stringToWords(headerString)
 		if len(headerWords) != 2 {
 			return nil, fmt.Errorf("%s is not a valid column header", headerString)
 		}
@@ -646,7 +697,7 @@ func parseUpdateSetStatement(db *openDB, sql string, scheme tableScheme) (*recor
 }
 
 func parseUpdateQuery(db *openDB, sql string) (*updateQuery, error) {
-	words := strings.FieldsFunc(sql, isWhitespace)
+	words := stringToWords(sql)
 	tableID := tableIDFromQuery(words, "update")
 	cond, err := parseWhereStatementInQuery(db, sql, tableID)
 	if err != nil {
@@ -667,7 +718,7 @@ func parseUpdateQuery(db *openDB, sql string) (*updateQuery, error) {
 }
 
 func parseQueryType(sql string) (queryType, error) {
-	words := strings.FieldsFunc(sql, isWhitespace)
+	words := stringToWords(sql)
 	if len(words) == 0 {
 		return QueryTypeInvalid, fmt.Errorf("empty query")
 	}

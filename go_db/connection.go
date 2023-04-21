@@ -1,5 +1,7 @@
 package go_db
 
+import "sort"
+
 type Connection struct {
 	db database
 }
@@ -26,6 +28,19 @@ func (conn *Connection) OpenCursor() Cursor {
 	return Cursor{conn: conn}
 }
 
+func orderRecords(records []Record, pivot uint32) {
+	// TODO: check pivot is valid - we need to make sure it exists and has a less method
+
+	// sorts in place
+	sort.Slice(records, func(i, j int) bool {
+		firstField := records[i].Fields[pivot]
+		otherValue := records[j].Fields[pivot].serialize()
+		// TODO: handle errors
+		isLess, _ := checkLess(firstField, otherValue)
+		return isLess
+	})
+}
+
 func ExecuteSelectQuery(openDatabse *openDB, cursor *Cursor, sql string) error {
 	query, err := parseSelectQuery(openDatabse, sql)
 	if err != nil {
@@ -34,6 +49,10 @@ func ExecuteSelectQuery(openDatabse *openDB, cursor *Cursor, sql string) error {
 	records, err := filterRecordsFromTableInternal(openDatabse, query.tableID, query.condition, query.columns)
 	if err != nil {
 		return err
+	}
+
+	if query.orderBy != nil {
+		orderRecords(records, *query.orderBy)
 	}
 
 	cursor.records = records

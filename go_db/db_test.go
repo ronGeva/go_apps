@@ -68,7 +68,7 @@ func buildTable2() (database, string) {
 	secondColumn := columndHeader{"columnB", FieldTypeInt}
 	scheme := tableScheme{[]columndHeader{firstColumn, secondColumn}}
 	writeNewTable(db, tableID, scheme)
-	fields := []Field{&IntField{5}, &IntField{11}}
+	fields := []Field{&IntField{5}, &IntField{44}}
 	newRecord := MakeRecord(fields)
 	addRecordToTable(db, tableID, newRecord)
 	fields = []Field{&IntField{13}, &IntField{30}}
@@ -140,7 +140,7 @@ func TestConditions(t *testing.T) {
 
 func buildConditionTreeForTest() conditionNode {
 	node1 := conditionNode{condition: &condition{0, ConditionTypeEqual, uint32ToBytes(5)}}
-	node2 := conditionNode{condition: &condition{1, ConditionTypeEqual, uint32ToBytes(11)}}
+	node2 := conditionNode{condition: &condition{1, ConditionTypeEqual, uint32ToBytes(44)}}
 	return conditionNode{operator: ConditionOperatorAnd, operands: []*conditionNode{&node1, &node2}}
 }
 
@@ -274,6 +274,37 @@ func TestCursorSelect1(t *testing.T) {
 		t.Fail()
 	}
 	if intField.Value != 5 {
+		t.Fail()
+	}
+}
+
+func TestCursorSelect2(t *testing.T) {
+	db, tableID := buildTable2()
+	dbPath := db.id.identifyingString
+	conn, err := Connect(dbPath)
+	if err != nil {
+		t.Fail()
+	}
+	cursor := conn.OpenCursor()
+	regulardOrderRecords := readAllRecords(db, tableID)
+
+	// sanity
+	if len(regulardOrderRecords) != 2 {
+		t.Fail()
+	}
+
+	err = cursor.Execute("Select columnA, ColumnB from newTable order by columnB")
+	if err != nil {
+		t.Fail()
+	}
+	records := cursor.FetchAll()
+	if len(records) != 2 {
+		t.Fail()
+	}
+
+	// We expect the order of the records to be reversed
+	if !areRecordsEqual(regulardOrderRecords[0], records[1]) ||
+		!areRecordsEqual(regulardOrderRecords[1], records[0]) {
 		t.Fail()
 	}
 }

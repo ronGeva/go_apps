@@ -2,11 +2,18 @@
 
 The go_db project contains a simple yet efficient implementation of a relational database.
 Currently supported SQL operations:
- * select
- * insert
- * update
- * delete
- * update
+<ul>
+  <li>select</li>
+    <ul>
+        <li> specific columns </li>
+        <li> where clause </li>
+        <li> order by </li>
+    </ul>
+  <li>insert</li>
+  <li>update</li>
+  <li>delete</li>
+  <li>update</li>
+</ul>
 
  The "where" clause can be used in all operations other than insert (as expected).
 
@@ -19,7 +26,7 @@ if err != nil {
     return err
 }
 cursor := conn.OpenCursor()
-err = cursor.Execute("Select columnA, ColumnB from newTable where columnA = 5")
+err = cursor.Execute("Select columnA, ColumnB from newTable where columnA = 5 order by columnA")
 if err != nil {
     return err
 }
