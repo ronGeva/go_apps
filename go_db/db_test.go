@@ -35,8 +35,7 @@ func areRecordsEqual(record1 Record, record2 Record) bool {
 	return true
 }
 
-func initializeTestDB1() (database, string) {
-	path := "C:\\temp\\my_db"
+func initializeTestDB(path string) (database, string) {
 	tableID := "newTable"
 	os.Remove(path) // don't care about errors
 
@@ -45,8 +44,13 @@ func initializeTestDB1() (database, string) {
 	return db, tableID
 }
 
-func buildTable1() (database, string) {
-	db, tableID := initializeTestDB1()
+func initializeTestDB1() (database, string) {
+	path := "C:\\temp\\my_db"
+	return initializeTestDB(path)
+}
+
+func buildTableWithDbPath1(dbPath string) (database, string) {
+	db, tableID := initializeTestDB(dbPath)
 
 	firstColumn := columndHeader{"columnA", FieldTypeInt}
 	secondColumn := columndHeader{"columnB", FieldTypeBlob}
@@ -61,8 +65,12 @@ func buildTable1() (database, string) {
 	return db, tableID
 }
 
-func buildTable2() (database, string) {
-	db, tableID := initializeTestDB1()
+func buildTable1() (database, string) {
+	return buildTableWithDbPath1("C:\\temp\\my_db")
+}
+
+func buildTableWithDbPath2(dbPath string) (database, string) {
+	db, tableID := initializeTestDB(dbPath)
 
 	firstColumn := columndHeader{"columnA", FieldTypeInt}
 	secondColumn := columndHeader{"columnB", FieldTypeInt}
@@ -75,6 +83,11 @@ func buildTable2() (database, string) {
 	newRecord = MakeRecord(fields)
 	addRecordToTable(db, tableID, newRecord)
 	return db, tableID
+}
+
+func buildTable2() (database, string) {
+	dbPath := "c:\\temp\\my_db"
+	return buildTableWithDbPath2(dbPath)
 }
 
 func getConnectionTable2() (*testContext, error) {
@@ -516,7 +529,7 @@ func TestBitmapExpansion(t *testing.T) {
 }
 
 func TestMapEachRecord(t *testing.T) {
-	db, tableID := buildTable2()
+	db, tableID := buildTableWithDbPath2(IN_MEMORY_BUFFER_PATH_MAGIC)
 
 	// Delete all previous records
 	err := deleteRecordsFromTable(db, tableID, nil)
@@ -551,7 +564,7 @@ func TestMapEachRecord(t *testing.T) {
 }
 
 func TestAddAlotOfRecords1(t *testing.T) {
-	db, tableID := buildTable1()
+	db, tableID := buildTableWithDbPath1(IN_MEMORY_BUFFER_PATH_MAGIC)
 
 	// Delete all previous records
 	err := deleteRecordsFromTable(db, tableID, nil)
@@ -604,5 +617,15 @@ func TestStringField(t *testing.T) {
 		if !areRecordsEqual(records[i], recordsToAdd[i]) {
 			t.Fail()
 		}
+	}
+}
+
+// Simple sanity test - make sure we can initialize a table and then read its
+// contents
+func TestInMemoryBuffer(t *testing.T) {
+	db, tableID := buildTableWithDbPath1(IN_MEMORY_BUFFER_PATH_MAGIC)
+	records := readAllRecords(db, tableID)
+	if len(records) != 2 {
+		t.Fail()
 	}
 }

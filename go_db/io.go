@@ -33,6 +33,80 @@ type IoInterface interface {
 	Close() error
 }
 
+/////////////////// in memory IO /////////////////////////////////////////////////////////
+type InMemoryBuffer struct {
+	buffer        []byte
+	offset        int64
+	validDataSize int64
+}
+
+func (buf *InMemoryBuffer) Seek(offset int64, whence int) (ret int64, err error) {
+	var newOffset int64
+	// Treat the offset as absolute
+	if whence == io.SeekStart {
+		newOffset = 0
+	}
+	if whence == io.SeekCurrent {
+		newOffset = buf.offset
+	}
+	if whence == io.SeekEnd {
+		newOffset = buf.validDataSize
+	}
+	newOffset += offset
+	if newOffset < 0 || newOffset > buf.validDataSize {
+		return 0, fmt.Errorf("cannot seek past end/start of buffer")
+	}
+
+	buf.offset = newOffset
+	return buf.offset, nil
+}
+
+func (buf *InMemoryBuffer) Read(b []byte) (n int, err error) {
+	availableSize := buf.validDataSize - buf.offset
+	sizeToRead := int64(len(b))
+	if sizeToRead > availableSize {
+		sizeToRead = availableSize
+	}
+
+	copy(b, buf.buffer[buf.offset:buf.offset+int64(sizeToRead)])
+
+	buf.offset += int64(sizeToRead)
+
+	return int(sizeToRead), nil
+}
+
+func (buf *InMemoryBuffer) Write(b []byte) (n int, err error) {
+	availableSize := len(buf.buffer) - int(buf.offset)
+	if availableSize < len(b) {
+		return 0, fmt.Errorf("not enough space in buffer to write %d bytes", len(b))
+	}
+
+	copy(buf.buffer[buf.offset:], b)
+	buf.offset += int64(len(b))
+
+	// Update valid data size, if necessary
+	if buf.offset > buf.validDataSize {
+		buf.validDataSize = buf.offset
+	}
+
+	return len(b), nil
+}
+
+func (buf *InMemoryBuffer) Close() error {
+	// Nothing we should do here, the gc will take care of the actual data
+	return nil
+}
+
+func createInMemoryBuffer(size int64) (*InMemoryBuffer, error) {
+	return &InMemoryBuffer{buffer: make([]byte, size), offset: 0, validDataSize: 0}, nil
+}
+
+const IN_MEMORY_BUFFER_PATH_MAGIC = "__IN_MEMORY_BUFFER__"
+
+var IN_MEMORY_BUFFER *InMemoryBuffer = nil
+
+///////////////////////////////////////////////////////////////////////////////////////
+
 type mutableDbPointer struct {
 	pointer  dbPointer
 	location int64
@@ -318,7 +392,11 @@ func writeToDataBlock(db *openDB, pointer dbPointer, data []byte, offset uint32)
 	}
 }
 
-func closeDBFile(f *os.File, newMode int) {
+func closeDBFile(f IoInterface, newMode int) {
 	f.Close()
-	os.Chmod(f.Name(), os.FileMode(newMode))
+
+	file, ok := f.(*os.File)
+	if ok {
+		os.Chmod(file.Name(), os.FileMode(newMode))
+	}
 }

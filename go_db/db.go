@@ -98,10 +98,9 @@ func deserializeDbHeader(data []byte) dbHeader {
 }
 
 func InitializeDB(path string) {
-	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0)
+	f := getIOInterface(path, os.O_RDWR|os.O_CREATE|os.O_EXCL)
 	// this is a bug workaround, file is always created as read-only, change it to read-write
 	defer closeDBFile(f, 0600)
-	check(err)
 
 	// Note that a few data blocks must be reserved for the header, bitmap, and the tables array
 	// 3 blocks are necessary
@@ -128,11 +127,26 @@ func InitializeDB(path string) {
 	// Nothing to write - table array is initialized as empty
 }
 
-func getOpenDB(db database) openDB {
-	dbPath := db.id.identifyingString
-	// TODO: change this to allow multiple read-writes at the same time
-	f, err := os.OpenFile(dbPath, os.O_RDWR, os.ModeExclusive)
+func getIOInterface(dbPath string, mode int) IoInterface {
+	var f IoInterface = nil
+	var err error = nil
+
+	if dbPath == IN_MEMORY_BUFFER_PATH_MAGIC {
+		if IN_MEMORY_BUFFER == nil {
+			IN_MEMORY_BUFFER, err = createInMemoryBuffer(1024 * 1024 * 20) // 20 MB
+		}
+		f = IN_MEMORY_BUFFER
+	} else {
+		// TODO: change this to allow multiple read-writes at the same time
+		f, err = os.OpenFile(dbPath, mode, os.ModeExclusive)
+	}
 	check(err)
+
+	return f
+}
+
+func getOpenDB(db database) openDB {
+	f := getIOInterface(db.id.identifyingString, os.O_RDWR)
 
 	headerData := readFromFile(f, DB_HEADER_SIZE, 0)
 	header := deserializeDbHeader(headerData)
