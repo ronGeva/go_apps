@@ -58,11 +58,16 @@ type BTreeKeyPointerPair struct {
 }
 
 type bTreeNode struct {
-	isInternal    bool // internal don't point to user data but to other nodes, external nodes contain user data
+	isInternal bool // internal don't point to user data but to other nodes, external nodes contain user data
+	// A list of key-pointer pairs.
+	// Each pointer points to the next node/user value
+	// Each key represents the smallest key found underneath this child node (note this is different from a
+	// standard B+ tree which contains the smallest value of the next node instead)
 	nodePointers  []BTreeKeyPointerPair
 	maximumDegree int
 	persistency   PersistencyApi
-	pointer       bTreePointer
+	selfPointer   bTreePointer
+	nextNode      bTreePointer // Points to the next brother node
 }
 
 // Assume the underlying value is bTreeKeyType
@@ -87,25 +92,30 @@ func InitializeBTree() (*BTree, error) {
 	return &BTree{rootPointer: invalidBTreePointer, persistency: &inMemoryPersistency, minimumDegree: 3}, nil
 }
 
-func initializeBTreeNodeFromBrother(node *bTreeNode) *bTreeNode {
+func initializeBTreeNode(maximumDegree int, isInternal bool, persistency PersistencyApi) *bTreeNode {
 	newNode := &bTreeNode{}
-	newNode.isInternal = node.isInternal
+	newNode.isInternal = isInternal
 	newNode.nodePointers = make([]BTreeKeyPointerPair, 0)
-	newNode.maximumDegree = node.maximumDegree
-	newNode.persistency = node.persistency
-	newNode.pointer = invalidBTreePointer
+	newNode.maximumDegree = maximumDegree
+	newNode.persistency = persistency
+	newNode.selfPointer = invalidBTreePointer
+	newNode.nextNode = invalidBTreePointer
 
 	return newNode
 }
 
+func initializeBTreeNodeFromBrother(node *bTreeNode) *bTreeNode {
+	return initializeBTreeNode(node.maximumDegree, node.isInternal, node.persistency)
+}
+
 func (node *bTreeNode) persist() {
-	pointer := node.persistency.PersistNode(node, node.pointer)
-	if node.pointer != invalidBTreePointer && node.pointer != pointer {
+	pointer := node.persistency.PersistNode(node, node.selfPointer)
+	if node.selfPointer != invalidBTreePointer && node.selfPointer != pointer {
 		// TODO: what if the persistency API changes the pointer? Should we support this flow?
 		panic(errors.New("got different pointer during persist"))
 	}
 
-	node.pointer = pointer
+	node.selfPointer = pointer
 }
 
 func (node *bTreeNode) full() bool {
@@ -124,9 +134,11 @@ func (node *bTreeNode) splitChild(childIndex int) bTreePointer {
 	middleIndex := leftNode.maximumDegree / 2
 	rightNode.nodePointers = append(rightNode.nodePointers, leftNode.nodePointers[middleIndex:]...)
 	leftNode.nodePointers = leftNode.nodePointers[:middleIndex]
+	rightNode.nextNode = leftNode.nextNode
 
 	// Save the new node
 	rightPointer := node.persistency.PersistNode(rightNode, invalidBTreePointer)
+	leftNode.nextNode = rightPointer
 
 	// Add a pointer to the right child
 	newValue := BTreeKeyPointerPair{key: rightNode.nodePointers[0].key, pointer: rightPointer}
@@ -137,10 +149,10 @@ func (node *bTreeNode) splitChild(childIndex int) bTreePointer {
 	leftNode.persist()
 	// The node itself was changed, persist it
 	node.persist()
-	return node.pointer
+	return node.selfPointer
 }
 
-func (node *bTreeNode) findMatchingNode(item BTreeKeyPointerPair) int {
+func (node *bTreeNode) findMatchingNodeIndex(item BTreeKeyPointerPair) int {
 	// If the key is smaller than everything in this node, return the smallest child node
 	if item.key <= node.nodePointers[0].key {
 		return 0
@@ -158,18 +170,29 @@ func (node *bTreeNode) findMatchingNode(item BTreeKeyPointerPair) int {
 	return len(node.nodePointers) - 1
 }
 
-func (node *bTreeNode) insertNonFullInternal(item BTreeKeyPointerPair) {
-	innerNodeIndex := node.findMatchingNode(item)
+func (node *bTreeNode) findMatchingNode(item BTreeKeyPointerPair) *bTreeNode {
+	innerNodeIndex := node.findMatchingNodeIndex(item)
 	innerNodePointer := node.nodePointers[innerNodeIndex]
 	innerNode := node.persistency.LoadNode(innerNodePointer.pointer)
 	if innerNode.full() {
 		node.splitChild(innerNodeIndex)
-		// Check if the newly created node should contain the new item
-		if item.key >= innerNodePointer.key {
-			innerNode = node.persistency.LoadNode(node.nodePointers[innerNodeIndex+1].pointer)
-		}
+
+		// the inner node shouldn't be full this time
+		return node.findMatchingNode(item)
+	} else {
+		return innerNode
 	}
+}
+
+func (node *bTreeNode) insertNonFullInternal(item BTreeKeyPointerPair) {
+	innerNode := node.findMatchingNode(item)
 	innerNode.insertNonFull(item)
+
+	// New item changes the minimal value of this nodes' children, reflect that in node pointers
+	if item.key < node.nodePointers[0].key {
+		node.nodePointers[0].key = item.key
+		node.persist()
+	}
 }
 
 func (node *bTreeNode) insertNonFullLeaf(item BTreeKeyPointerPair) {
@@ -179,7 +202,7 @@ func (node *bTreeNode) insertNonFullLeaf(item BTreeKeyPointerPair) {
 	i := len(node.nodePointers) - 1
 	// move all keys bigger than the new item one location forward
 	for ; i > 0; i-- {
-		if item.key >= node.nodePointers[i].key {
+		if item.key >= node.nodePointers[i-1].key {
 			break // found the location for the new item
 		}
 
@@ -203,7 +226,7 @@ func (node *bTreeNode) insertNonFull(item BTreeKeyPointerPair) {
 func (tree *BTree) Insert(item BTreeKeyPointerPair) error {
 	if tree.rootPointer == invalidBTreePointer {
 		// tree is empty, allocate root
-		root := &bTreeNode{isInternal: false, nodePointers: make([]BTreeKeyPointerPair, 0), persistency: tree.persistency, maximumDegree: 5}
+		root := initializeBTreeNode(5, false, tree.persistency)
 		root.nodePointers = append(root.nodePointers, item)
 		tree.rootPointer = tree.persistency.PersistNode(root, invalidBTreePointer)
 		return nil
@@ -239,7 +262,7 @@ func (tree *BTree) Iterator() *BTreeIterator {
 	currentNode := tree.persistency.LoadNode(tree.rootPointer)
 
 	// traverse the leftside of the tree until we've reached a leaf node
-	for !currentNode.isInternal {
+	for currentNode.isInternal {
 		currentNode = tree.persistency.LoadNode(currentNode.nodePointers[0].pointer)
 	}
 	// reached an internal node
@@ -251,12 +274,13 @@ func (iterator *BTreeIterator) advanceIfNeeded() bool {
 		return true
 	}
 
-	pointer := iterator.currentNode.nodePointers[iterator.offsetInNode-1].pointer
+	pointer := iterator.currentNode.nextNode
 	if pointer == invalidBTreePointer {
-		return false // no more entries
+		// no more nodes
+		return false
 	}
 
-	iterator.currentNode = iterator.tree.persistency.LoadNode(pointer)
+	iterator.currentNode = iterator.currentNode.persistency.LoadNode(pointer)
 	iterator.offsetInNode = 0
 	return true
 }
