@@ -13,6 +13,7 @@ type userValueRetrievalFunc func(bTreePointer) bTreeValueType
 type allocateNodeFunc func() (bTreePointer, *bTreeNode)
 
 var globalCounter int32 = 0
+var BTreeErrorNotFound error = errors.New("item not found")
 
 type PersistencyApi interface {
 	// loads a node from a bTreePointer that was previously received from PersistNode
@@ -22,6 +23,9 @@ type PersistencyApi interface {
 	// This function receives the optional parameter of the original pointer to the node,
 	// and returns the new points to it (that can be used to load it again in the future)
 	PersistNode(*bTreeNode, bTreePointer) bTreePointer
+
+	// Deletes the node
+	RemoveNode(bTreePointer)
 }
 
 type InMemoryPersistency struct {
@@ -34,7 +38,9 @@ func (api *InMemoryPersistency) LoadNode(pointer bTreePointer) *bTreeNode {
 		return nil
 	}
 
-	return api.nodesInMemory[pointer]
+	node := api.nodesInMemory[pointer]
+	node.selfPointer = pointer
+	return node
 }
 
 func (api *InMemoryPersistency) PersistNode(node *bTreeNode, pointer bTreePointer) bTreePointer {
@@ -47,6 +53,10 @@ func (api *InMemoryPersistency) PersistNode(node *bTreeNode, pointer bTreePointe
 
 	api.nodesInMemory[newPointer] = node
 	return newPointer
+}
+
+func (api *InMemoryPersistency) RemoveNode(pointer bTreePointer) {
+	delete(api.nodesInMemory, pointer)
 }
 
 const invalidBTreePointer bTreePointer = -1
@@ -122,6 +132,10 @@ func (node *bTreeNode) full() bool {
 	return len(node.nodePointers) == node.maximumDegree
 }
 
+func (node *bTreeNode) halfEmpty() bool {
+	return len(node.nodePointers) <= node.maximumDegree/2
+}
+
 // Splits child #childIndex of the current node.
 // A new node will be created for the bigger half of the child node items.
 // Returns the new pointer of the current node (it is guranteed to be changed and therefore persisted during this
@@ -152,6 +166,83 @@ func (node *bTreeNode) splitChild(childIndex int) bTreePointer {
 	return node.selfPointer
 }
 
+func (node *bTreeNode) stealFromBrother(brother *bTreeNode, isPrev bool) {
+	if isPrev {
+		// steal the biggest item
+		item := brother.nodePointers[len(brother.nodePointers)-1]
+		brother.nodePointers = brother.nodePointers[:len(brother.nodePointers)-1]
+		node.nodePointers = append([]BTreeKeyPointerPair{item}, node.nodePointers...)
+	} else {
+		// steal the smallest item
+		item := brother.nodePointers[0]
+		brother.nodePointers = brother.nodePointers[1:]
+		node.nodePointers = append(node.nodePointers, item)
+	}
+
+	node.persist()
+	brother.persist()
+}
+
+// Increases the amount of nodes in a child node by 1, either by an item from his brother, or by merging it
+// with one of his brother/this node
+func (node *bTreeNode) fill(childIndex int) {
+	innerNodePointer := node.nodePointers[childIndex]
+	innerNode := node.persistency.LoadNode(innerNodePointer.pointer)
+
+	var leftNode *bTreeNode = nil
+	var rightNode *bTreeNode = nil
+
+	if childIndex > 0 {
+		leftNode = node.persistency.LoadNode(node.nodePointers[childIndex-1].pointer)
+	}
+	if childIndex < len(node.nodePointers)-1 {
+		rightNode = node.persistency.LoadNode(node.nodePointers[childIndex+1].pointer)
+	}
+
+	if leftNode != nil && !leftNode.halfEmpty() {
+		innerNode.stealFromBrother(leftNode, true)
+		node.nodePointers[childIndex].key = innerNode.nodePointers[0].key
+		return
+	}
+
+	if rightNode != nil && !rightNode.halfEmpty() {
+		innerNode.stealFromBrother(rightNode, false)
+		node.nodePointers[childIndex+1].key = rightNode.nodePointers[0].key
+		return
+	}
+
+	// failed to steal item from brothers, merge instead
+	var mergedNode *bTreeNode = nil
+	var nodeToDelete *bTreeNode = nil
+	var deletionPointer BTreeKeyPointerPair
+	if leftNode != nil {
+		mergedNode = leftNode
+		nodeToDelete = innerNode
+		deletionPointer = innerNodePointer
+	} else {
+		// we know that rightNode != nil, since each node!=root has at least one brother
+		mergedNode = innerNode
+		nodeToDelete = rightNode
+		deletionPointer = node.nodePointers[childIndex+1]
+	}
+
+	mergedNode.nodePointers = append(mergedNode.nodePointers, nodeToDelete.nodePointers...)
+	mergedNode.nextNode = nodeToDelete.nextNode
+	mergedNode.persist()
+	node.removeFromLeaf(deletionPointer)
+	node.persistency.RemoveNode(nodeToDelete.selfPointer)
+	if len(node.nodePointers) == 1 {
+		// notice this can only occur at the root, as we guaranteed all nodes except for the root
+		// are not half empty.
+
+		// make the pointer of this node point to the merged node instead
+		mergedNode.selfPointer = node.selfPointer
+		// delete self from persistence
+		node.persistency.RemoveNode(node.selfPointer)
+		*node = *mergedNode
+	}
+}
+
 func (node *bTreeNode) findMatchingNodeIndex(item BTreeKeyPointerPair) int {
 	// If the key is smaller than everything in this node, return the smallest child node
 	if item.key <= node.nodePointers[0].key {
@@ -170,22 +261,39 @@ func (node *bTreeNode) findMatchingNodeIndex(item BTreeKeyPointerPair) int {
 	return len(node.nodePointers) - 1
 }
 
-func (node *bTreeNode) findMatchingNode(item BTreeKeyPointerPair) *bTreeNode {
+func (node *bTreeNode) findMatchingNode(item BTreeKeyPointerPair) (*bTreeNode, int) {
 	innerNodeIndex := node.findMatchingNodeIndex(item)
 	innerNodePointer := node.nodePointers[innerNodeIndex]
-	innerNode := node.persistency.LoadNode(innerNodePointer.pointer)
+	return node.persistency.LoadNode(innerNodePointer.pointer), innerNodeIndex
+}
+
+func (node *bTreeNode) findMatchingNodeInsert(item BTreeKeyPointerPair) *bTreeNode {
+	innerNode, innerNodeIndex := node.findMatchingNode(item)
 	if innerNode.full() {
 		node.splitChild(innerNodeIndex)
 
 		// the inner node shouldn't be full this time
-		return node.findMatchingNode(item)
-	} else {
-		return innerNode
+		innerNode, _ = node.findMatchingNode(item)
 	}
+
+	return innerNode
+}
+
+func (node *bTreeNode) findMatchingNodeDelete(item BTreeKeyPointerPair) (*bTreeNode, int) {
+	innerNode, innerNodeIndex := node.findMatchingNode(item)
+	if innerNode.halfEmpty() {
+		node.fill(innerNodeIndex)
+		node.persist()
+
+		// the inner node shouldn't be half-empty this time
+		innerNode, innerNodeIndex = node.findMatchingNode(item)
+	}
+
+	return innerNode, innerNodeIndex
 }
 
 func (node *bTreeNode) insertNonFullInternal(item BTreeKeyPointerPair) {
-	innerNode := node.findMatchingNode(item)
+	innerNode := node.findMatchingNodeInsert(item)
 	innerNode.insertNonFull(item)
 
 	// New item changes the minimal value of this nodes' children, reflect that in node pointers
@@ -223,6 +331,49 @@ func (node *bTreeNode) insertNonFull(item BTreeKeyPointerPair) {
 	}
 }
 
+// returns whether or not the item was removed
+func (node *bTreeNode) removeFromLeaf(item BTreeKeyPointerPair) bool {
+	index := -1
+	for i := 0; i < len(node.nodePointers); i++ {
+		if node.nodePointers[i] == item {
+			index = i
+			break
+		}
+	}
+
+	if index == -1 {
+		return false
+	}
+
+	node.nodePointers = append(node.nodePointers[:index], node.nodePointers[index+1:]...)
+	return true
+}
+
+func (node *bTreeNode) remove(item BTreeKeyPointerPair) bool {
+	removed := false
+	if node.isInternal {
+		innerNode, index := node.findMatchingNodeDelete(item)
+		removed = innerNode.remove(item)
+
+		// if the inner node's smallest key has changed, update it in the parent
+		if removed && node.nodePointers[index].key == item.key {
+			node.nodePointers[index].key = innerNode.nodePointers[0].key
+			node.persist()
+		}
+	} else {
+		removed = node.removeFromLeaf(item)
+		if removed && len(node.nodePointers) == 0 {
+			// This can only happen for the root node, update accordingly
+			node.persistency.RemoveNode(node.selfPointer)
+			node.selfPointer = invalidBTreePointer
+		} else {
+			node.persist()
+		}
+	}
+
+	return removed
+}
+
 func (tree *BTree) Insert(item BTreeKeyPointerPair) error {
 	if tree.rootPointer == invalidBTreePointer {
 		// tree is empty, allocate root
@@ -254,7 +405,30 @@ func (tree *BTree) Insert(item BTreeKeyPointerPair) error {
 }
 
 func (tree *BTree) Delete(item BTreeKeyPointerPair) error {
+	// Algorithm:
+	// Traverse the tree to find the leaf node in which the item resides.
+	// At every node on the way (except for the root), if the if len(children)< maxDegree/2 then fill the node.
+	// If the item isn't found, return an error.
+	// If the item is found, remove it from the leaf, then check if len(children) < maxDegree/2, and if so, fill the
+	// node.
 
+	// Filling a node is done using this algorithm:
+	// If the prev brother node or the next brother node has more children than maxDegree/2, borrow one value from them.
+	// Otherwise, merge the node with on of its brothers.
+	// If a merge was done and the new node has 0 brothers, replace its father node with it and remove it.
+
+	if tree.rootPointer == invalidBTreePointer {
+		return BTreeErrorNotFound
+	}
+
+	root := tree.persistency.LoadNode(tree.rootPointer)
+
+	removed := root.remove(item)
+	if !removed {
+		return BTreeErrorNotFound
+	}
+	// update the root pointer, just in case something has changed
+	tree.rootPointer = root.selfPointer
 	return nil
 }
 

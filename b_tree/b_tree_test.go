@@ -6,6 +6,24 @@ import (
 	"testing"
 )
 
+type bTreePairArray struct {
+	pairs []BTreeKeyPointerPair
+}
+
+func (pairs *bTreePairArray) Len() int {
+	return len(pairs.pairs)
+}
+
+func (pairs *bTreePairArray) Less(i, j int) bool {
+	return pairs.pairs[i].key < pairs.pairs[j].key
+}
+
+func (pairs *bTreePairArray) Swap(i, j int) {
+	temp := pairs.pairs[i]
+	pairs.pairs[i] = pairs.pairs[j]
+	pairs.pairs[j] = temp
+}
+
 // insert 100 incrementing bTree pairs and fail if something crashes
 func TestInsertionSanity(t *testing.T) {
 	tree, error := InitializeBTree()
@@ -82,6 +100,64 @@ func TestInsertThenIterateRandomOrder(t *testing.T) {
 	}
 
 	if len(iteratorOutput) != amount {
+		t.Fail()
+	}
+}
+
+func TestSingleInsertThenDelete(t *testing.T) {
+	tree, error := InitializeBTree()
+	if error != nil {
+		t.Fail()
+	}
+
+	item := BTreeKeyPointerPair{pointer: bTreePointer(5), key: bTreeKeyType(12)}
+	tree.Insert(item)
+	tree.Delete(item)
+
+	// make sure the tree is now empty
+	if tree.rootPointer != invalidBTreePointer {
+		t.Fail()
+	}
+}
+
+func TestMultipleInsertThenPartialDelete(t *testing.T) {
+	tree, error := InitializeBTree()
+	if error != nil {
+		t.Fail()
+	}
+
+	amount := 1000
+	randomRange := 100000
+
+	pairs := bTreePairArray{}
+	for i := 0; i < amount; i++ {
+		randomNumber := rand.Intn(randomRange)
+		pairs.pairs = append(pairs.pairs, BTreeKeyPointerPair{key: bTreeKeyType(randomNumber),
+			pointer: bTreePointer(i)})
+		tree.Insert(pairs.pairs[i])
+	}
+
+	deletionAmount := rand.Intn(amount / 2)
+	deletionStart := rand.Intn(amount - deletionAmount)
+	for i := deletionStart; i < deletionStart+deletionAmount; i++ {
+		tree.Delete(pairs.pairs[i])
+	}
+
+	pairs.pairs = append(pairs.pairs[:deletionStart], pairs.pairs[deletionStart+deletionAmount:]...)
+	sort.Sort(&pairs)
+	iterator := tree.Iterator()
+
+	iteratorOutput := make([]BTreeKeyPointerPair, 0)
+	pair := iterator.Next()
+	for pair != nil {
+		iteratorOutput = append(iteratorOutput, *pair)
+		if pair.key != pairs.pairs[len(iteratorOutput)-1].key {
+			t.Fail()
+		}
+		pair = iterator.Next()
+	}
+
+	if len(iteratorOutput) != pairs.Len() {
 		t.Fail()
 	}
 }
