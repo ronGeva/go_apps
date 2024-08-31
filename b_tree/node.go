@@ -2,11 +2,11 @@ package b_tree
 
 import "errors"
 
-const invalidBTreePointer bTreePointer = -1
+const invalidBTreePointer BTreePointer = -1
 
 // Each pointer-value pair indicate a node with a values starting with that value
 type BTreeKeyPointerPair struct {
-	pointer bTreePointer
+	pointer BTreePointer
 	key     bTreeKeyType
 }
 
@@ -19,8 +19,8 @@ type bTreeNode struct {
 	nodePointers  []BTreeKeyPointerPair
 	maximumDegree int
 	persistency   persistencyApi
-	selfPointer   bTreePointer
-	nextNode      bTreePointer // Points to the next brother node
+	selfPointer   BTreePointer
+	nextNode      BTreePointer // Points to the next brother node
 }
 
 func initializeBTreeNodeFromBrother(node *bTreeNode) *bTreeNode {
@@ -49,7 +49,7 @@ func (node *bTreeNode) halfEmpty() bool {
 // A new node will be created for the bigger half of the child node items.
 // Returns the new pointer of the current node (it is guranteed to be changed and therefore persisted during this
 // function).
-func (node *bTreeNode) splitChild(childIndex int) bTreePointer {
+func (node *bTreeNode) splitChild(childIndex int) BTreePointer {
 	leftNode := node.persistency.LoadNode(node.nodePointers[childIndex].pointer)
 	rightNode := initializeBTreeNodeFromBrother(leftNode)
 

@@ -1,27 +1,48 @@
 package b_tree
 
 import (
+	"encoding/binary"
 	"errors"
 )
 
-type bTreePointer int64
+// Externally supplied BTreePointer values should always be positive.
+// Negative BTreePointer values are used internally by the b_tree module and should
+// never be used by external code (such as the persistency interface)
+type BTreePointer int64
 type bTreeKeyType int
 
 var BTreeErrorNotFound error = errors.New("item not found")
 
 // Assume the underlying value is bTreeKeyType
 type BTree struct {
-	rootPointer bTreePointer
+	rootPointer BTreePointer
 	// The following members represent pointers to structures in "memory"
 	persistency   persistencyApi
 	minimumDegree int
 }
 
-func InitializeBTree() (*BTree, error) {
-	inMemoryPersistency := InitializeInMemoryPersistency()
-	persistency := persistencyApi{store: inMemoryPersistency}
+func deserializeBTree(data []byte, persistency persistencyApi) *BTree {
+	root := binary.LittleEndian.Uint64(data[:8])
+	return &BTree{rootPointer: BTreePointer(root), persistency: persistency}
+}
 
-	return &BTree{rootPointer: invalidBTreePointer, persistency: persistency, minimumDegree: 3}, nil
+func serializeBTree(tree *BTree) []byte {
+	data := make([]byte, 8)
+	binary.LittleEndian.PutUint64(data[:8], uint64(tree.rootPointer))
+	return data
+}
+
+func InitializeBTree(store PersistencyInterface) (*BTree, error) {
+	persistency := persistencyApi{store: store}
+	rootData, err := store.Load(store.RootPointer())
+	if err == BTreeNotInitialized {
+		return &BTree{rootPointer: invalidBTreePointer, persistency: persistency, minimumDegree: 3}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	return deserializeBTree(rootData, persistency), nil
 }
 
 func initializeBTreeNode(maximumDegree int, isInternal bool, persistency persistencyApi) *bTreeNode {
@@ -36,12 +57,18 @@ func initializeBTreeNode(maximumDegree int, isInternal bool, persistency persist
 	return newNode
 }
 
+func (tree *BTree) updateRootPointer(pointer BTreePointer) {
+	tree.rootPointer = pointer
+	tree.persistency.PersistTree(tree)
+}
+
 func (tree *BTree) Insert(item BTreeKeyPointerPair) error {
 	if tree.rootPointer == invalidBTreePointer {
 		// tree is empty, allocate root
 		root := initializeBTreeNode(5, false, tree.persistency)
 		root.nodePointers = append(root.nodePointers, item)
-		tree.rootPointer = tree.persistency.PersistNode(root, invalidBTreePointer)
+		root.persist()
+		tree.updateRootPointer(root.selfPointer)
 		return nil
 	}
 
@@ -57,7 +84,7 @@ func (tree *BTree) Insert(item BTreeKeyPointerPair) error {
 		// now split the old root from the perspective of the new one
 		newRootPointer := newRoot.splitChild(0)
 		// save the new root pointer in the tree
-		tree.rootPointer = newRootPointer
+		tree.updateRootPointer(newRootPointer)
 		root = newRoot
 	}
 

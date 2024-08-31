@@ -1,37 +1,54 @@
 package b_tree
 
-import "sync/atomic"
+import (
+	"errors"
+	"sync/atomic"
+)
+
+var inMemoryRootPointer BTreePointer = -2
 
 type InMemoryPersistency struct {
-	nodesInMemory map[bTreePointer][]byte
+	nodesInMemory map[BTreePointer][]byte
 	counter       int32
 }
 
 func InitializeInMemoryPersistency() *InMemoryPersistency {
-	return &InMemoryPersistency{counter: 0, nodesInMemory: make(map[bTreePointer][]byte)}
+	return &InMemoryPersistency{counter: 0, nodesInMemory: make(map[BTreePointer][]byte)}
 }
 
-func (api *InMemoryPersistency) LoadNode(pointer bTreePointer) []byte {
+func (api *InMemoryPersistency) Load(pointer BTreePointer) ([]byte, error) {
 	if pointer == invalidBTreePointer {
-		return nil
+		return nil, errors.New("invliad pointer passed to Load")
 	}
 
-	node := api.nodesInMemory[pointer]
-	return node
+	node, ok := api.nodesInMemory[pointer]
+	if ok {
+		return node, nil
+	}
+
+	if pointer == inMemoryRootPointer {
+		return nil, BTreeNotInitialized
+	}
+
+	return nil, errors.New("data unavailable")
 }
 
-func (api *InMemoryPersistency) PersistNode(node []byte, pointer bTreePointer) bTreePointer {
+func (api *InMemoryPersistency) Persist(node []byte, pointer BTreePointer) (BTreePointer, error) {
 	if pointer != invalidBTreePointer {
 		api.nodesInMemory[pointer] = node
-		return pointer
+		return pointer, nil
 	}
 
-	newPointer := bTreePointer(atomic.AddInt32(&api.counter, 1))
+	newPointer := BTreePointer(atomic.AddInt32(&api.counter, 1))
 
 	api.nodesInMemory[newPointer] = node
-	return newPointer
+	return newPointer, nil
 }
 
-func (api *InMemoryPersistency) RemoveNode(pointer bTreePointer) {
+func (api *InMemoryPersistency) Delete(pointer BTreePointer) {
 	delete(api.nodesInMemory, pointer)
+}
+
+func (api *InMemoryPersistency) RootPointer() BTreePointer {
+	return inMemoryRootPointer
 }

@@ -24,15 +24,19 @@ func (pairs *bTreePairArray) Swap(i, j int) {
 	pairs.pairs[j] = temp
 }
 
+func initializeInMemoryBTree() (*BTree, error) {
+	return InitializeBTree(InitializeInMemoryPersistency())
+}
+
 // insert 100 incrementing bTree pairs and fail if something crashes
 func TestInsertionSanity(t *testing.T) {
-	tree, error := InitializeBTree()
+	tree, error := initializeInMemoryBTree()
 	if error != nil {
 		t.Fail()
 	}
 
 	for i := 0; i < 100; i++ {
-		pair := BTreeKeyPointerPair{pointer: bTreePointer(i), key: bTreeKeyType(i)}
+		pair := BTreeKeyPointerPair{pointer: BTreePointer(i), key: bTreeKeyType(i)}
 		tree.Insert(pair)
 	}
 }
@@ -40,13 +44,13 @@ func TestInsertionSanity(t *testing.T) {
 // insert 100 incrementing bTree pairs, then iterate them in order and make sure we get the correct
 // output
 func TestInsertThenIterate(t *testing.T) {
-	tree, error := InitializeBTree()
+	tree, error := initializeInMemoryBTree()
 	if error != nil {
 		t.Fail()
 	}
 
 	for i := 0; i < 100; i++ {
-		pair := BTreeKeyPointerPair{pointer: bTreePointer(i), key: bTreeKeyType(i)}
+		pair := BTreeKeyPointerPair{pointer: BTreePointer(i), key: bTreeKeyType(i)}
 		tree.Insert(pair)
 	}
 
@@ -68,7 +72,7 @@ func TestInsertThenIterate(t *testing.T) {
 
 // insert 10000 random entries, then iterate them in order and make sure we get the correct results
 func TestInsertThenIterateRandomOrder(t *testing.T) {
-	tree, error := InitializeBTree()
+	tree, error := initializeInMemoryBTree()
 	if error != nil {
 		t.Fail()
 	}
@@ -82,7 +86,7 @@ func TestInsertThenIterateRandomOrder(t *testing.T) {
 		randomNumber := rand.Intn(randomRange)
 		values[i] = randomNumber
 		pairs[i].key = bTreeKeyType(randomNumber)
-		pairs[i].pointer = bTreePointer(i)
+		pairs[i].pointer = BTreePointer(i)
 		tree.Insert(pairs[i])
 	}
 
@@ -105,12 +109,12 @@ func TestInsertThenIterateRandomOrder(t *testing.T) {
 }
 
 func TestSingleInsertThenDelete(t *testing.T) {
-	tree, error := InitializeBTree()
+	tree, error := initializeInMemoryBTree()
 	if error != nil {
 		t.Fail()
 	}
 
-	item := BTreeKeyPointerPair{pointer: bTreePointer(5), key: bTreeKeyType(12)}
+	item := BTreeKeyPointerPair{pointer: BTreePointer(5), key: bTreeKeyType(12)}
 	tree.Insert(item)
 	tree.Delete(item)
 
@@ -121,7 +125,7 @@ func TestSingleInsertThenDelete(t *testing.T) {
 }
 
 func TestMultipleInsertThenPartialDelete(t *testing.T) {
-	tree, error := InitializeBTree()
+	tree, error := initializeInMemoryBTree()
 	if error != nil {
 		t.Fail()
 	}
@@ -133,7 +137,7 @@ func TestMultipleInsertThenPartialDelete(t *testing.T) {
 	for i := 0; i < amount; i++ {
 		randomNumber := rand.Intn(randomRange)
 		pairs.pairs = append(pairs.pairs, BTreeKeyPointerPair{key: bTreeKeyType(randomNumber),
-			pointer: bTreePointer(i)})
+			pointer: BTreePointer(i)})
 		tree.Insert(pairs.pairs[i])
 	}
 
@@ -162,21 +166,32 @@ func TestMultipleInsertThenPartialDelete(t *testing.T) {
 	}
 }
 
+// A simple persistency store which holds a single buffer and always returns it
 type dummyPersistencyStore struct {
 	buffer []byte
 }
 
-func (store *dummyPersistencyStore) LoadNode(bTreePointer) []byte {
-	return store.buffer
+var dummyPersistencyStoreRootPointer BTreePointer = -2
+
+func (store *dummyPersistencyStore) Load(pointer BTreePointer) ([]byte, error) {
+	if pointer == dummyPersistencyStoreRootPointer {
+		return nil, BTreeNotInitialized
+	}
+
+	return store.buffer, nil
 }
 
-func (store *dummyPersistencyStore) PersistNode(data []byte, pointer bTreePointer) bTreePointer {
+func (store *dummyPersistencyStore) Persist(data []byte, pointer BTreePointer) (BTreePointer, error) {
 	store.buffer = data
-	return pointer
+	return pointer, nil
 }
 
-func (store *dummyPersistencyStore) RemoveNode(bTreePointer) {
+func (store *dummyPersistencyStore) Delete(BTreePointer) {
 	store.buffer = []byte{}
+}
+
+func (store *dummyPersistencyStore) RootPointer() BTreePointer {
+	return dummyPersistencyStoreRootPointer
 }
 
 func areNodesEqual(left *bTreeNode, right *bTreeNode) bool {
@@ -209,7 +224,7 @@ func areNodesEqual(left *bTreeNode, right *bTreeNode) bool {
 }
 
 func TestPersistencySanity(t *testing.T) {
-	dummyPointer := bTreePointer(105)
+	dummyPointer := BTreePointer(105)
 	persistency := persistencyApi{store: &dummyPersistencyStore{}}
 	pointers := []BTreeKeyPointerPair{{pointer: 11, key: 5}, {pointer: 55, key: 37}}
 	node := bTreeNode{isInternal: true, maximumDegree: 17, persistency: persistency,
@@ -223,7 +238,7 @@ func TestPersistencySanity(t *testing.T) {
 }
 
 func TestPersistencyInMemoryStore(t *testing.T) {
-	dummyPointer := bTreePointer(105)
+	dummyPointer := BTreePointer(105)
 	persistency := persistencyApi{store: InitializeInMemoryPersistency()}
 	pointers := []BTreeKeyPointerPair{{pointer: 11, key: 5}, {pointer: 55, key: 37}}
 	node := bTreeNode{isInternal: true, maximumDegree: 17, persistency: persistency,
@@ -232,6 +247,26 @@ func TestPersistencyInMemoryStore(t *testing.T) {
 	outputNode := persistency.LoadNode(dummyPointer)
 
 	if !areNodesEqual(&node, outputNode) {
+		t.Fail()
+	}
+}
+
+func TestMultipleInitializationSanity(t *testing.T) {
+	store := InitializeInMemoryPersistency()
+	tree, err := InitializeBTree(store)
+	if err != nil {
+		t.Fail()
+	}
+
+	tree.Insert(BTreeKeyPointerPair{1, 2})
+	tree, err = InitializeBTree(store)
+	if err != nil {
+		t.Fail()
+	}
+
+	iterator := tree.Iterator()
+	pair := iterator.Next()
+	if pair.key != 2 || pair.pointer != 1 {
 		t.Fail()
 	}
 }
