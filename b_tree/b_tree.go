@@ -2,7 +2,6 @@ package b_tree
 
 import (
 	"errors"
-	"sync/atomic"
 )
 
 type bTreeValueType int
@@ -12,52 +11,7 @@ type nodeRetrievalFunc func(bTreePointer) *bTreeNode
 type userValueRetrievalFunc func(bTreePointer) bTreeValueType
 type allocateNodeFunc func() (bTreePointer, *bTreeNode)
 
-var globalCounter int32 = 0
 var BTreeErrorNotFound error = errors.New("item not found")
-
-type PersistencyApi interface {
-	// loads a node from a bTreePointer that was previously received from PersistNode
-	LoadNode(bTreePointer) *bTreeNode
-
-	// Persists a node into the persistent storage
-	// This function receives the optional parameter of the original pointer to the node,
-	// and returns the new points to it (that can be used to load it again in the future)
-	PersistNode(*bTreeNode, bTreePointer) bTreePointer
-
-	// Deletes the node
-	RemoveNode(bTreePointer)
-}
-
-type InMemoryPersistency struct {
-	nodesInMemory map[bTreePointer]*bTreeNode
-	counter       int32
-}
-
-func (api *InMemoryPersistency) LoadNode(pointer bTreePointer) *bTreeNode {
-	if pointer == invalidBTreePointer {
-		return nil
-	}
-
-	node := api.nodesInMemory[pointer]
-	node.selfPointer = pointer
-	return node
-}
-
-func (api *InMemoryPersistency) PersistNode(node *bTreeNode, pointer bTreePointer) bTreePointer {
-	if pointer != invalidBTreePointer {
-		api.nodesInMemory[pointer] = node
-		return pointer
-	}
-
-	newPointer := bTreePointer(atomic.AddInt32(&api.counter, 1))
-
-	api.nodesInMemory[newPointer] = node
-	return newPointer
-}
-
-func (api *InMemoryPersistency) RemoveNode(pointer bTreePointer) {
-	delete(api.nodesInMemory, pointer)
-}
 
 const invalidBTreePointer bTreePointer = -1
 
@@ -75,7 +29,7 @@ type bTreeNode struct {
 	// standard B+ tree which contains the smallest value of the next node instead)
 	nodePointers  []BTreeKeyPointerPair
 	maximumDegree int
-	persistency   PersistencyApi
+	persistency   persistencyApi
 	selfPointer   bTreePointer
 	nextNode      bTreePointer // Points to the next brother node
 }
@@ -84,7 +38,7 @@ type bTreeNode struct {
 type BTree struct {
 	rootPointer bTreePointer
 	// The following members represent pointers to structures in "memory"
-	persistency   PersistencyApi
+	persistency   persistencyApi
 	getUserValue  userValueRetrievalFunc
 	minimumDegree int
 }
@@ -96,13 +50,13 @@ type BTreeIterator struct {
 }
 
 func InitializeBTree() (*BTree, error) {
-	inMemoryPersistency := InMemoryPersistency{nodesInMemory: map[bTreePointer]*bTreeNode{}, counter: 0}
+	inMemoryPersistency := InitializeInMemoryPersistency()
+	persistency := persistencyApi{store: inMemoryPersistency}
 
-	//root := &bTreeNode{isInternal: false, nodePointers: make([]bTreeKeyPointerPair, 0), persistency: &inMemoryPersistency, maximumDegree: 3}
-	return &BTree{rootPointer: invalidBTreePointer, persistency: &inMemoryPersistency, minimumDegree: 3}, nil
+	return &BTree{rootPointer: invalidBTreePointer, persistency: persistency, minimumDegree: 3}, nil
 }
 
-func initializeBTreeNode(maximumDegree int, isInternal bool, persistency PersistencyApi) *bTreeNode {
+func initializeBTreeNode(maximumDegree int, isInternal bool, persistency persistencyApi) *bTreeNode {
 	newNode := &bTreeNode{}
 	newNode.isInternal = isInternal
 	newNode.nodePointers = make([]BTreeKeyPointerPair, 0)

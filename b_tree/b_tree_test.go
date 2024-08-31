@@ -161,3 +161,77 @@ func TestMultipleInsertThenPartialDelete(t *testing.T) {
 		t.Fail()
 	}
 }
+
+type dummyPersistencyStore struct {
+	buffer []byte
+}
+
+func (store *dummyPersistencyStore) LoadNode(bTreePointer) []byte {
+	return store.buffer
+}
+
+func (store *dummyPersistencyStore) PersistNode(data []byte, pointer bTreePointer) bTreePointer {
+	store.buffer = data
+	return pointer
+}
+
+func (store *dummyPersistencyStore) RemoveNode(bTreePointer) {
+	store.buffer = []byte{}
+}
+
+func areNodesEqual(left *bTreeNode, right *bTreeNode) bool {
+	if left.isInternal != right.isInternal {
+		return false
+	}
+
+	if left.maximumDegree != right.maximumDegree {
+		return false
+	}
+
+	if left.nextNode != right.nextNode {
+		return false
+	}
+
+	if left.selfPointer != right.selfPointer {
+		return false
+	}
+
+	if len(left.nodePointers) != len(right.nodePointers) {
+		return false
+	}
+
+	for i := 0; i < len(left.nodePointers); i++ {
+		if left.nodePointers[i] != right.nodePointers[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func TestPersistencySanity(t *testing.T) {
+	dummyPointer := bTreePointer(105)
+	persistency := persistencyApi{store: &dummyPersistencyStore{}}
+	pointers := []BTreeKeyPointerPair{{pointer: 11, key: 5}, {pointer: 55, key: 37}}
+	node := bTreeNode{isInternal: true, maximumDegree: 17, persistency: persistency,
+		nextNode: 101, nodePointers: pointers, selfPointer: dummyPointer}
+	persistency.PersistNode(&node, dummyPointer)
+	outputNode := persistency.LoadNode(dummyPointer)
+
+	if !areNodesEqual(&node, outputNode) {
+		t.Fail()
+	}
+}
+
+func TestPersistencyInMemoryStore(t *testing.T) {
+	dummyPointer := bTreePointer(105)
+	persistency := persistencyApi{store: InitializeInMemoryPersistency()}
+	pointers := []BTreeKeyPointerPair{{pointer: 11, key: 5}, {pointer: 55, key: 37}}
+	node := bTreeNode{isInternal: true, maximumDegree: 17, persistency: persistency,
+		nextNode: 101, nodePointers: pointers, selfPointer: dummyPointer}
+	persistency.PersistNode(&node, dummyPointer)
+	outputNode := persistency.LoadNode(dummyPointer)
+
+	if !areNodesEqual(&node, outputNode) {
+		t.Fail()
+	}
+}
