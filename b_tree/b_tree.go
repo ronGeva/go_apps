@@ -4,12 +4,8 @@ import (
 	"errors"
 )
 
-type bTreeValueType int
 type bTreePointer int64
 type bTreeKeyType int
-type nodeRetrievalFunc func(bTreePointer) *bTreeNode
-type userValueRetrievalFunc func(bTreePointer) bTreeValueType
-type allocateNodeFunc func() (bTreePointer, *bTreeNode)
 
 var BTreeErrorNotFound error = errors.New("item not found")
 
@@ -39,7 +35,6 @@ type BTree struct {
 	rootPointer bTreePointer
 	// The following members represent pointers to structures in "memory"
 	persistency   persistencyApi
-	getUserValue  userValueRetrievalFunc
 	minimumDegree int
 }
 

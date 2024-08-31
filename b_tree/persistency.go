@@ -4,8 +4,6 @@ import (
 	"encoding/binary"
 )
 
-var globalCounter int32 = 0
-
 type PersistencyInterface interface {
 	// loads a node from a bTreePointer that was previously received from PersistNode
 	LoadNode(bTreePointer) []byte
