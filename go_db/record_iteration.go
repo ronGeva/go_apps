@@ -4,6 +4,14 @@ This module contains logic related to iteration of records in a table.
 
 package go_db
 
+// this struct contains all the information needed to modify a record from a table (update/deletion)
+// - its index (used to locate and delete/modify it)
+// - all of its key fields (used to remove it from the relevant indexes/modify its keys in the index)
+type recordForChange struct {
+	index uint32
+	keys  []Field
+}
+
 type mapFunctionType[outputType any, mapInput any] func(context recordContext, input mapInput) outputType
 
 func filterRecordsWorker[outputType any, mapInput any](recordsChannel <-chan recordContext,
@@ -23,22 +31,32 @@ func filterRecordsWorker[outputType any, mapInput any](recordsChannel <-chan rec
 	}
 }
 
+func getSubsetOfFields(record *Record, columns []uint32) []Field {
+	fields := make([]Field, 0)
+
+	if columns == nil {
+		return fields
+	}
+
+	for _, index := range columns {
+		fields = append(fields, record.Fields[index])
+	}
+
+	return fields
+}
+
 func mapGetRecords(context recordContext, requestedColumns []uint32) Record {
 	record := context.record
 	if requestedColumns == nil {
 		return record
 	}
 
-	newRecord := Record{}
-	for _, index := range requestedColumns {
-		newRecord.Fields = append(newRecord.Fields, record.Fields[index])
-	}
-
-	return newRecord
+	return Record{Fields: getSubsetOfFields(&record, requestedColumns)}
 }
 
-func mapGetRecordIndexes(context recordContext, unused interface{}) uint32 {
-	return context.index
+func mapGetRecordForChange(context recordContext, keyFields []uint32) recordForChange {
+	keys := getSubsetOfFields(&context.record, keyFields)
+	return recordForChange{keys: keys, index: context.index}
 }
 
 func waitForWorkers[outputType any](outChannel <-chan outputType, doneChannel <-chan bool, numOfWorkers uint32) []outputType {

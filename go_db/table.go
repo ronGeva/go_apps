@@ -4,17 +4,24 @@ import (
 	"encoding/binary"
 	"fmt"
 	"strings"
+
+	"github.com/ronGeva/go_apps/b_tree"
 )
 
 type recordsCallbackFunc[contextType any] func(record Record, index int, context contextType)
 
-type columndHeader struct {
-	columnName string
-	columnType FieldType
-}
-
 type tableScheme struct {
 	columns []columndHeader
+}
+
+func (scheme *tableScheme) indexedColumns() []uint32 {
+	columns := make([]uint32, 0)
+	for i := 0; i < len(scheme.columns); i++ {
+		if scheme.columns[i].index != nil {
+			columns = append(columns, uint32(i))
+		}
+	}
+	return columns
 }
 
 /*
@@ -61,14 +68,8 @@ func addNewTableToTablesArray(db *openDB, newTablePointer dbPointer) mutableDbPo
 
 func writeTableScheme(db *openDB, scheme tableScheme, mutablePointer mutableDbPointer, offset uint32) uint32 {
 	schemeData := make([]byte, 4) // column headers size will contain unitialized data at first
-	headersSize := 0
 	for _, columnHeader := range scheme.columns {
-		schemeData = append(schemeData, byte(columnHeader.columnType))
-		columnNameSizeBytes := make([]byte, 4)
-		binary.LittleEndian.PutUint32(columnNameSizeBytes, uint32(len(columnHeader.columnName)))
-		schemeData = append(schemeData, columnNameSizeBytes...)
-		schemeData = append(schemeData, []byte(columnHeader.columnName)...)
-		headersSize += 1 + 4 + len(columnHeader.columnName)
+		schemeData = append(schemeData, serializeColumnHeader(columnHeader)...)
 	}
 	// Put the size of the scheme data at the start of it
 	binary.LittleEndian.PutUint32(schemeData[:4], uint32(len(schemeData)-4))
@@ -76,16 +77,14 @@ func writeTableScheme(db *openDB, scheme tableScheme, mutablePointer mutableDbPo
 	return uint32(len(schemeData))
 }
 
-func parseTableScheme(schemeData []byte) tableScheme {
+func parseTableScheme(db *openDB, schemeData []byte) tableScheme {
 	scheme := tableScheme{}
+	var header columndHeader
 	for i := 0; i < len(schemeData); {
-		columnType := int8(schemeData[i])
-		columnNameSize := binary.LittleEndian.Uint32(schemeData[i+1 : i+5])
-		columnName := string(schemeData[i+5 : i+5+int(columnNameSize)])
-		scheme.columns = append(scheme.columns,
-			columndHeader{columnType: FieldType(columnType), columnName: columnName})
-		i += 5 + int(columnNameSize)
+		header, i = deserializeColumnHeader(db, schemeData, i)
+		scheme.columns = append(scheme.columns, header)
 	}
+
 	return scheme
 }
 
@@ -157,9 +156,30 @@ func findTable(openDatabse *openDB, tableID string) (*dbPointer, error) {
 	return nil, &TableNotFoundError{tableID}
 }
 
-func writeRecordToTable(db *openDB, headers tableHeaders, recordIndex uint32, data []byte) {
+// Adds a record to all the table's indexes
+func addRecordToIndexes(scheme *tableScheme, record Record, recordIndex uint32) {
+	for i := 0; i < len(scheme.columns); i++ {
+		column := scheme.columns[i]
+		if column.index == nil {
+			continue
+		}
+
+		key := record.Fields[i].ToKey()
+		if key == nil {
+			// this field does not support indexing
+			continue
+		}
+
+		// recordIndex is the index of the record in the table's bitmap,
+		// which means we can easily figure out where the record is by using it
+		column.index.Insert(b_tree.BTreeKeyPointerPair{Pointer: b_tree.BTreePointer(recordIndex), Key: *key})
+	}
+}
+
+func writeRecordToTable(db *openDB, headers tableHeaders, recordIndex uint32, record Record) {
 	// Find the offset of the new record
 	// TODO: handle data block extension
+	data := serializeRecord(db, record)
 
 	recordsPointer := headers.records
 	prevAmountOfRecords := recordsPointer.pointer.size / (DB_POINTER_SIZE * uint32(len(headers.scheme.columns)))
@@ -171,6 +191,8 @@ func writeRecordToTable(db *openDB, headers tableHeaders, recordIndex uint32, da
 		// Write a new record
 		appendDataToDataBlock(db, data, uint32(recordsPointer.location))
 	}
+
+	addRecordToIndexes(&headers.scheme, record, recordIndex)
 }
 
 func parseTableHeaders(db *openDB, tablePointer dbPointer) tableHeaders {
@@ -178,7 +200,7 @@ func parseTableHeaders(db *openDB, tablePointer dbPointer) tableHeaders {
 	schemeOffset := tablePointer.offset + 4 + uniqueIDSize
 	schemeSize := binary.LittleEndian.Uint32(readFromDB(db, 4, schemeOffset))
 	schemeData := readFromDB(db, schemeSize, schemeOffset+4)
-	scheme := parseTableScheme(schemeData)
+	scheme := parseTableScheme(db, schemeData)
 	bitmapOffset := schemeOffset + 4 + schemeSize
 	bitmapPointer := getDbPointer(db, bitmapOffset)
 	recordsPointerOffset := bitmapOffset + DB_POINTER_SIZE
@@ -189,20 +211,19 @@ func parseTableHeaders(db *openDB, tablePointer dbPointer) tableHeaders {
 	}
 }
 
-func addRecordToTableInternal(db *openDB, tablePointer dbPointer, recordData []byte) {
+func addRecordToTableInternal(db *openDB, tablePointer dbPointer, record Record) {
 	headers := parseTableHeaders(db, tablePointer)
 	bitmapData := readAllDataFromDbPointer(db, headers.bitmap.pointer)
 	firstAvailableRecordNum := findFirstAvailableBlock(bitmapData)
 
-	writeRecordToTable(db, headers, firstAvailableRecordNum, recordData)
+	writeRecordToTable(db, headers, firstAvailableRecordNum, record)
 	writeBitToBitmap(db, int64(headers.bitmap.location), firstAvailableRecordNum, 1)
 }
 
 func addRecordOpenDb(db *openDB, tableID string, record Record) {
-	recordData := serializeRecord(db, record)
 	tablePointer, err := findTable(db, tableID)
 	check(err)
-	addRecordToTableInternal(db, *tablePointer, recordData)
+	addRecordToTableInternal(db, *tablePointer, record)
 }
 
 func addRecordToTable(db database, tableID string, record Record) {
@@ -234,12 +255,40 @@ func readAllRecords(db database, tableID string) []Record {
 	return records
 }
 
-func deleteRecordInternal(db *openDB, headers tableHeaders, recordIndex uint32) error {
-	if !checkBit(db, headers.bitmap.pointer, int(recordIndex)) {
+func removeRecordFromIndexes(record *recordForChange, scheme *tableScheme) error {
+	keyIndex := 0
+	for i := 0; i < len(scheme.columns); i++ {
+		if scheme.columns[i].index == nil {
+			continue
+		}
+
+		if keyIndex >= len(record.keys) {
+			return fmt.Errorf("missing index #%d in record for deletion, len of keys in record %d", i, len(record.keys))
+		}
+
+		index := scheme.columns[i].index
+		pointer := b_tree.BTreePointer(record.index)
+		key := record.keys[keyIndex].ToKey()
+		if key == nil {
+			return fmt.Errorf("failed to convert field to key value")
+		}
+
+		keyIndex += 1
+		err := index.Delete(b_tree.BTreeKeyPointerPair{Pointer: pointer, Key: *key})
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func deleteRecordInternal(db *openDB, headers tableHeaders, record *recordForChange) error {
+	if !checkBit(db, headers.bitmap.pointer, int(record.index)) {
 		return &RecordNotFoundError{}
 	}
-	writeBitToBitmap(db, headers.bitmap.location, recordIndex, 0)
-	return nil
+	writeBitToBitmap(db, headers.bitmap.location, record.index, 0)
+	return removeRecordFromIndexes(record, &headers.scheme)
 }
 
 func getTableHeaders(db *openDB, tableID string) (*tableHeaders, error) {
@@ -261,7 +310,7 @@ func deleteRecord(db database, tableID string, recordIndex uint32) error {
 		return err
 	}
 
-	return deleteRecordInternal(&openDatabse, *headers, recordIndex)
+	return deleteRecordInternal(&openDatabse, *headers, &recordForChange{index: recordIndex})
 }
 
 func validateConditions(scheme tableScheme, recordsCondition conditionNode) bool {
@@ -319,17 +368,20 @@ func filterRecordsFromTableInternal(openDatabase *openDB, tableID string, record
 }
 
 func deleteRecordsFromTableInternal(db *openDB, tableID string, recordsCondition *conditionNode) error {
-	recordsToDelete, err := mapEachRecord(db, tableID, recordsCondition, mapGetRecordIndexes, nil)
-	if err != nil {
-		return err
-	}
-
 	headers, err := getTableHeaders(db, tableID)
 	if err != nil {
 		return err
 	}
-	for _, index := range recordsToDelete {
-		deleteRecordInternal(db, *headers, index)
+
+	indexedColumns := headers.scheme.indexedColumns()
+
+	recordsToDelete, err := mapEachRecord(db, tableID, recordsCondition, mapGetRecordForChange, indexedColumns)
+	if err != nil {
+		return err
+	}
+
+	for _, recordForDeletion := range recordsToDelete {
+		deleteRecordInternal(db, *headers, &recordForDeletion)
 	}
 	return nil
 }
@@ -366,7 +418,9 @@ func updateField(db *openDB, headers tableHeaders, offset uint32, change recordC
 	return nil
 }
 
-func updateRecord(db *openDB, headers tableHeaders, recordIndex int, update recordUpdate) error {
+func updateRecord(db *openDB, headers tableHeaders, record recordForChange, update recordUpdate,
+	keysChanged []uint32) error {
+	recordIndex := int(record.index)
 	if !checkBit(db, headers.bitmap.pointer, recordIndex) {
 		return fmt.Errorf("cannot update an invalid record index %d", recordIndex)
 	}
@@ -381,14 +435,33 @@ func updateRecord(db *openDB, headers tableHeaders, recordIndex int, update reco
 	return nil
 }
 
-func updateRecords(db *openDB, headers tableHeaders, recordIndexes []uint32, update recordUpdate) error {
-	for _, recordIndex := range recordIndexes {
-		err := updateRecord(db, headers, int(recordIndex), update)
+func updateRecords(db *openDB, headers tableHeaders, records []recordForChange, update recordUpdate,
+	keysChanged []uint32) error {
+	for _, record := range records {
+		err := updateRecord(db, headers, record, update, keysChanged)
 		if err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+func columnsIntersection(left []uint32, right []uint32) []uint32 {
+	res := make([]uint32, 0)
+
+	// do it in O(n^2) since this is much more readable than using sets and we expect the amount of columns
+	// to be very small (unlikely this will result in more than 100 iterations...)
+	for i := 0; i < len(left); i++ {
+		for j := 0; j < len(right); j++ {
+			if left[i] != right[j] {
+				continue
+			}
+			res = append(res, left[i])
+			break
+		}
+	}
+
+	return res
 }
 
 func updateRecordsViaCondition(db *openDB, tableID string, condition *conditionNode, update recordUpdate) error {
@@ -397,12 +470,19 @@ func updateRecordsViaCondition(db *openDB, tableID string, condition *conditionN
 		return err
 	}
 
-	recordIndexes, err := mapEachRecord(db, tableID, condition, mapGetRecordIndexes, nil)
+	indexedColumns := tableHeaders.scheme.indexedColumns()
+	columnsChanged := make([]uint32, 0)
+	for i := 0; i < len(update.changes); i++ {
+		columnsChanged = append(columnsChanged, uint32(update.changes[i].fieldIndex))
+	}
+	keysChanged := columnsIntersection(indexedColumns, columnsChanged)
+
+	records, err := mapEachRecord(db, tableID, condition, mapGetRecordForChange, keysChanged)
 	if err != nil {
 		return err
 	}
 
-	err = updateRecords(db, *tableHeaders, recordIndexes, update)
+	err = updateRecords(db, *tableHeaders, records, update, keysChanged)
 	if err != nil {
 		return err
 	}

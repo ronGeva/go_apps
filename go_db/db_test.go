@@ -3,8 +3,12 @@ package go_db
 import (
 	"bytes"
 	"fmt"
+	"math/rand"
 	"os"
+	"sort"
 	"testing"
+
+	"github.com/ronGeva/go_apps/b_tree"
 )
 
 type testContext struct {
@@ -52,8 +56,8 @@ func initializeTestDB1() (database, string) {
 func buildTableWithDbPath1(dbPath string) (database, string) {
 	db, tableID := initializeTestDB(dbPath)
 
-	firstColumn := columndHeader{"columnA", FieldTypeInt}
-	secondColumn := columndHeader{"columnB", FieldTypeBlob}
+	firstColumn := columndHeader{"columnA", FieldTypeInt, nil, dbPointer{0, 0}}
+	secondColumn := columndHeader{"columnB", FieldTypeBlob, nil, dbPointer{0, 0}}
 	scheme := tableScheme{[]columndHeader{firstColumn, secondColumn}}
 	writeNewTable(db, tableID, scheme)
 	fields := []Field{&IntField{5}, &BlobField{make([]byte, 10)}}
@@ -72,8 +76,8 @@ func buildTable1() (database, string) {
 func buildTableWithDbPath2(dbPath string) (database, string) {
 	db, tableID := initializeTestDB(dbPath)
 
-	firstColumn := columndHeader{"columnA", FieldTypeInt}
-	secondColumn := columndHeader{"columnB", FieldTypeInt}
+	firstColumn := columndHeader{"columnA", FieldTypeInt, nil, dbPointer{0, 0}}
+	secondColumn := columndHeader{"columnB", FieldTypeInt, nil, dbPointer{0, 0}}
 	scheme := tableScheme{[]columndHeader{firstColumn, secondColumn}}
 	writeNewTable(db, tableID, scheme)
 	fields := []Field{&IntField{5}, &IntField{44}}
@@ -93,8 +97,8 @@ func buildTable2() (database, string) {
 func buildTableWithDbPath3(dbPath string) (database, string) {
 	db, tableID := initializeTestDB(dbPath)
 
-	firstColumn := columndHeader{"IDColumn", FieldTypeInt, nil, 0}
-	secondColumn := columndHeader{"NameColumn", FieldTypeString, nil, 0}
+	firstColumn := columndHeader{"IDColumn", FieldTypeInt, nil, dbPointer{0, 0}}
+	secondColumn := columndHeader{"NameColumn", FieldTypeString, nil, dbPointer{0, 0}}
 	scheme := tableScheme{[]columndHeader{firstColumn, secondColumn}}
 	writeNewTable(db, tableID, scheme)
 	fields := []Field{&IntField{11}, &StringField{"myname"}}
@@ -109,6 +113,30 @@ func buildTableWithDbPath3(dbPath string) (database, string) {
 func buildTable3() (database, string) {
 	dbPath := "C:\\temp\\my_db"
 	return buildTableWithDbPath3(dbPath)
+}
+
+// initializes a database with an index
+func buildTable4() (database, string) {
+	dbPath := "C:\\temp\\my_db"
+
+	db, tableID := initializeTestDB(dbPath)
+
+	firstColumn := columndHeader{"IDColumn", FieldTypeInt, nil, dbPointer{0, 0}}
+	secondColumn := columndHeader{"NameColumn", FieldTypeString, nil, dbPointer{0, 0}}
+	thirdColumn := columndHeader{"intColumn2", FieldTypeInt, nil, dbPointer{0, 0}}
+	scheme := tableScheme{[]columndHeader{firstColumn, secondColumn, thirdColumn}}
+	openDatabse := getOpenDB(db)
+	initializeIndexInColumn(&openDatabse, &scheme, 0)
+	closeOpenDB(&openDatabse)
+
+	writeNewTable(db, tableID, scheme)
+	fields := []Field{&IntField{1050}, &StringField{"myname"}, &IntField{555}}
+	newRecord := MakeRecord(fields)
+	addRecordToTable(db, tableID, newRecord)
+	fields = []Field{&IntField{1001}, &StringField{"othername"}, &IntField{137}}
+	newRecord = MakeRecord(fields)
+	addRecordToTable(db, tableID, newRecord)
+	return db, tableID
 }
 
 func getConnectionTable2() (*testContext, error) {
@@ -633,8 +661,8 @@ func TestAddAlotOfRecords1(t *testing.T) {
 
 func TestStringField(t *testing.T) {
 	db, tableID := initializeTestDB1()
-	firstColumn := columndHeader{"stringColumn1", FieldTypeString}
-	secondColumn := columndHeader{"stringColumn2", FieldTypeString}
+	firstColumn := columndHeader{"stringColumn1", FieldTypeString, nil, dbPointer{0, 0}}
+	secondColumn := columndHeader{"stringColumn2", FieldTypeString, nil, dbPointer{0, 0}}
 	scheme := tableScheme{[]columndHeader{firstColumn, secondColumn}}
 	writeNewTable(db, tableID, scheme)
 
@@ -666,5 +694,100 @@ func TestInMemoryBuffer(t *testing.T) {
 	records := readAllRecords(db, tableID)
 	if len(records) != 2 {
 		t.Fail()
+	}
+}
+
+func TestIndexSanity(t *testing.T) {
+	db, tableId := buildTable4()
+	openDb := getOpenDB(db)
+	headers, err := getTableHeaders(&openDb, tableId)
+	if err != nil {
+		t.Fail()
+	}
+
+	if headers.scheme.columns[0].index == nil {
+		t.Fail()
+	}
+
+	index := headers.scheme.columns[0].index
+	iterator := index.Iterator()
+	a := iterator.Next()
+
+	// make sure the first element is actually the smallest element in the table
+	if a.Key != 1001 {
+		t.Fail()
+	}
+}
+
+type recordsComparableByKey struct {
+	records []Record
+	key     int
+}
+
+func (records *recordsComparableByKey) Len() int {
+	return len(records.records)
+}
+
+func (records *recordsComparableByKey) Less(i, j int) bool {
+	leftKey := records.records[i].Fields[records.key].ToKey()
+	rightKey := records.records[j].Fields[records.key].ToKey()
+	return *leftKey < *rightKey
+}
+
+func (records *recordsComparableByKey) Swap(i, j int) {
+	temp := records.records[i]
+	records.records[i] = records.records[j]
+	records.records[j] = temp
+}
+
+func TestIndexAddManyRecords(t *testing.T) {
+	db, tableID := buildTable4()
+	records := recordsComparableByKey{records: make([]Record, 0), key: 0}
+
+	// first, add the fields that are already in the database
+	records.records = append(records.records,
+		MakeRecord([]Field{&IntField{1050}, &StringField{"myname"}, &IntField{555}}))
+	records.records = append(records.records,
+		MakeRecord([]Field{&IntField{1001}, &StringField{"othername"}, &IntField{137}}))
+
+	for i := 0; i < 1000; i++ {
+		firstInt := rand.Intn(10000)
+		secondInt := rand.Intn(1000)
+		randomBuffer := make([]byte, 200)
+		// the documentation pretty much gurantees this function will always succeed, no need to check return value
+		rand.Read(randomBuffer)
+		record := MakeRecord([]Field{&IntField{firstInt}, &StringField{string(randomBuffer)}, &IntField{secondInt}})
+		records.records = append(records.records, record)
+		addRecordToTable(db, tableID, record)
+	}
+
+	sort.Sort(&records)
+
+	openDb := getOpenDB(db)
+	headers, err := getTableHeaders(&openDb, tableID)
+	if err != nil {
+		t.Fail()
+	}
+
+	if headers.scheme.columns[0].index == nil {
+		t.Fail()
+	}
+
+	iterator := headers.scheme.columns[0].index.Iterator()
+	pairs := make([]b_tree.BTreeKeyPointerPair, 0)
+	pair := iterator.Next()
+	for pair != nil {
+		pairs = append(pairs, *pair)
+		pair = iterator.Next()
+	}
+
+	if len(pairs) != records.Len() {
+		t.Fail()
+	}
+
+	for i := 0; i < len(pairs); i++ {
+		if pairs[i].Key != *records.records[i].Fields[0].ToKey() {
+			t.Fail()
+		}
 	}
 }

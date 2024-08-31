@@ -43,6 +43,7 @@ Structure of column header:
 <column type> - 1 byte
 <size of column name> - 4 bytes
 <column name> - variable length
+<index pointer> - a pointer to a B+ tree represnting the index of this column
 
 Structure of table bitmap
 <bits> - <size of bitmap>

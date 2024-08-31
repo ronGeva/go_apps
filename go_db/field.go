@@ -9,6 +9,8 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+
+	"github.com/ronGeva/go_apps/b_tree"
 )
 
 type FieldType int8
@@ -47,6 +49,9 @@ type Field interface {
 	getType() FieldType
 	serialize() []byte
 	Stringify() string
+
+	// used for indexing
+	ToKey() *b_tree.BTreeKeyType
 }
 
 type IntField struct {
@@ -66,6 +71,11 @@ func (field IntField) serialize() []byte {
 
 func (field IntField) Stringify() string {
 	return strconv.Itoa(field.Value)
+}
+
+func (field IntField) ToKey() *b_tree.BTreeKeyType {
+	key := b_tree.BTreeKeyType(int(field.Value))
+	return &key
 }
 
 func deserializeIntField(data []byte) Field {
@@ -126,6 +136,10 @@ func (field BlobField) Stringify() string {
 	return "large binary data"
 }
 
+func (field BlobField) ToKey() *b_tree.BTreeKeyType {
+	return nil
+}
+
 func deserializeBlobField(data []byte) Field {
 	return BlobField{Data: data}
 }
@@ -144,6 +158,10 @@ func (field StringField) serialize() []byte {
 
 func (field StringField) Stringify() string {
 	return field.Value
+}
+
+func (field StringField) ToKey() *b_tree.BTreeKeyType {
+	return nil
 }
 
 func deserializeStringField(data []byte) Field {
