@@ -119,7 +119,7 @@ func TestSingleInsertThenDelete(t *testing.T) {
 	tree.Delete(item)
 
 	// make sure the tree is now empty
-	if tree.rootPointer != invalidBTreePointer {
+	if tree.rootPointer != InvalidBTreePointer {
 		t.Fail()
 	}
 }

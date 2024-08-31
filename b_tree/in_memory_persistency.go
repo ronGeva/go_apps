@@ -17,7 +17,7 @@ func InitializeInMemoryPersistency() *InMemoryPersistency {
 }
 
 func (api *InMemoryPersistency) Load(pointer BTreePointer) ([]byte, error) {
-	if pointer == invalidBTreePointer {
+	if pointer == InvalidBTreePointer {
 		return nil, errors.New("invliad pointer passed to Load")
 	}
 
@@ -34,7 +34,7 @@ func (api *InMemoryPersistency) Load(pointer BTreePointer) ([]byte, error) {
 }
 
 func (api *InMemoryPersistency) Persist(node []byte, pointer BTreePointer) (BTreePointer, error) {
-	if pointer != invalidBTreePointer {
+	if pointer != InvalidBTreePointer {
 		api.nodesInMemory[pointer] = node
 		return pointer, nil
 	}

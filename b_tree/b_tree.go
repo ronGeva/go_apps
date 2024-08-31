@@ -36,7 +36,7 @@ func InitializeBTree(store PersistencyInterface) (*BTree, error) {
 	persistency := persistencyApi{store: store}
 	rootData, err := store.Load(store.RootPointer())
 	if err == BTreeNotInitialized {
-		return &BTree{rootPointer: invalidBTreePointer, persistency: persistency, minimumDegree: 3}, nil
+		return &BTree{rootPointer: InvalidBTreePointer, persistency: persistency, minimumDegree: 3}, nil
 	}
 	if err != nil {
 		return nil, err
@@ -51,8 +51,8 @@ func initializeBTreeNode(maximumDegree int, isInternal bool, persistency persist
 	newNode.nodePointers = make([]BTreeKeyPointerPair, 0)
 	newNode.maximumDegree = maximumDegree
 	newNode.persistency = persistency
-	newNode.selfPointer = invalidBTreePointer
-	newNode.nextNode = invalidBTreePointer
+	newNode.selfPointer = InvalidBTreePointer
+	newNode.nextNode = InvalidBTreePointer
 
 	return newNode
 }
@@ -63,7 +63,7 @@ func (tree *BTree) updateRootPointer(pointer BTreePointer) {
 }
 
 func (tree *BTree) Insert(item BTreeKeyPointerPair) error {
-	if tree.rootPointer == invalidBTreePointer {
+	if tree.rootPointer == InvalidBTreePointer {
 		// tree is empty, allocate root
 		root := initializeBTreeNode(5, false, tree.persistency)
 		root.nodePointers = append(root.nodePointers, item)
@@ -106,7 +106,7 @@ func (tree *BTree) Delete(item BTreeKeyPointerPair) error {
 	// Otherwise, merge the node with on of its brothers.
 	// If a merge was done and the new node has 0 brothers, replace its father node with it and remove it.
 
-	if tree.rootPointer == invalidBTreePointer {
+	if tree.rootPointer == InvalidBTreePointer {
 		return BTreeErrorNotFound
 	}
 

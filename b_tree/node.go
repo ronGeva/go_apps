@@ -2,7 +2,7 @@ package b_tree
 
 import "errors"
 
-const invalidBTreePointer BTreePointer = -1
+const InvalidBTreePointer BTreePointer = -1
 
 // Each pointer-value pair indicate a node with a values starting with that value
 type BTreeKeyPointerPair struct {
@@ -29,7 +29,7 @@ func initializeBTreeNodeFromBrother(node *bTreeNode) *bTreeNode {
 
 func (node *bTreeNode) persist() {
 	pointer := node.persistency.PersistNode(node, node.selfPointer)
-	if node.selfPointer != invalidBTreePointer && node.selfPointer != pointer {
+	if node.selfPointer != InvalidBTreePointer && node.selfPointer != pointer {
 		// TODO: what if the persistency API changes the pointer? Should we support this flow?
 		panic(errors.New("got different pointer during persist"))
 	}
@@ -60,7 +60,7 @@ func (node *bTreeNode) splitChild(childIndex int) BTreePointer {
 	rightNode.nextNode = leftNode.nextNode
 
 	// Save the new node
-	rightPointer := node.persistency.PersistNode(rightNode, invalidBTreePointer)
+	rightPointer := node.persistency.PersistNode(rightNode, InvalidBTreePointer)
 	leftNode.nextNode = rightPointer
 
 	// Add a pointer to the right child
@@ -274,7 +274,7 @@ func (node *bTreeNode) remove(item BTreeKeyPointerPair) bool {
 		if removed && len(node.nodePointers) == 0 {
 			// This can only happen for the root node, update accordingly
 			node.persistency.RemoveNode(node.selfPointer)
-			node.selfPointer = invalidBTreePointer
+			node.selfPointer = InvalidBTreePointer
 		} else {
 			node.persist()
 		}

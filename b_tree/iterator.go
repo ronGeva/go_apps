@@ -12,7 +12,7 @@ func (iterator *BTreeIterator) advanceIfNeeded() bool {
 	}
 
 	pointer := iterator.currentNode.nextNode
-	if pointer == invalidBTreePointer {
+	if pointer == InvalidBTreePointer {
 		// no more nodes
 		return false
 	}
