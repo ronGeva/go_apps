@@ -95,9 +95,9 @@ func allocateNewDataBlock(db *openDB) dbPointer {
 }
 
 // Marks all the data blocks belonging to a pointer as invalid
-func deallocateDbPointer(db *openDB, pointer mutableDbPointer) error {
-	blockOffset := uint32(pointer.location)
-	for blockOffset != 0 {
+func deallocateDbPointer(db *openDB, pointer dbPointer) error {
+	blockOffset := pointer.offset
+	for blockOffset >= db.header.dataBlockSize {
 		blockIndex := blockOffset / db.header.dataBlockSize
 
 		// Make sure the data block is currently valid

@@ -351,11 +351,10 @@ func filterRecordsFromTable(db database, tableID string, recordsCondition *condi
 func updateField(db *openDB, headers tableHeaders, offset uint32, change recordChange) error {
 	fieldData := readFromDbPointer(db, headers.records.pointer, DB_POINTER_SIZE, offset)
 	fieldPointer := deserializeDbPointer(fieldData)
-	fieldMutablePointer := mutableDbPointer{pointer: fieldPointer, location: int64(offset)}
 	if fieldPointer.offset != 0 {
 		// Field contains a db pointer, actual data is in its own data block
 		// Deallocate this data block
-		err := deallocateDbPointer(db, fieldMutablePointer)
+		err := deallocateDbPointer(db, fieldPointer)
 		if err != nil {
 			return err
 		}
