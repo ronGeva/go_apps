@@ -86,7 +86,7 @@ func ExecuteCreateQuery(openDatabase *openDB, cursor *Cursor, sql string) error 
 	if err != nil {
 		return err
 	}
-	writeNewTableLocalFileInternal(openDatabase, query.tableID, query.scheme)
+	writeNewTableInternal(openDatabase, query.tableID, query.scheme)
 	return nil
 }
 

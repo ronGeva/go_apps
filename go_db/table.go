@@ -114,7 +114,7 @@ func initializeNewTableContent(db *openDB, tableID string, scheme tableScheme, t
 	tablePointer.pointer.size += DB_POINTER_SIZE
 }
 
-func writeNewTableLocalFileInternal(openDatabase *openDB, tableID string, scheme tableScheme) {
+func writeNewTableInternal(openDatabase *openDB, tableID string, scheme tableScheme) {
 	newTablePointer := allocateNewDataBlock(openDatabase)
 	mutablePointer := addNewTableToTablesArray(openDatabase, newTablePointer)
 	initializeNewTableContent(openDatabase, tableID, scheme, &mutablePointer)
@@ -123,7 +123,7 @@ func writeNewTableLocalFileInternal(openDatabase *openDB, tableID string, scheme
 func writeNewTableLocalFile(db database, tableID string, scheme tableScheme) {
 	openDatabase := getOpenDB(db)
 	defer closeOpenDB(&openDatabase)
-	writeNewTableLocalFileInternal(&openDatabase, tableID, scheme)
+	writeNewTableInternal(&openDatabase, tableID, scheme)
 }
 
 func writeNewTable(db database, tableID string, scheme tableScheme) error {
@@ -138,7 +138,7 @@ func writeNewTable(db database, tableID string, scheme tableScheme) error {
 		return fmt.Errorf("table %s already exists", tableID)
 	}
 
-	writeNewTableLocalFileInternal(&openDatabase, tableID, scheme)
+	writeNewTableInternal(&openDatabase, tableID, scheme)
 
 	return nil
 }
