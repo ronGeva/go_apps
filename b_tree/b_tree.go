@@ -36,7 +36,9 @@ func InitializeBTree(store PersistencyInterface) (*BTree, error) {
 	persistency := persistencyApi{store: store}
 	rootData, err := store.Load(store.RootPointer())
 	if err == BTreeNotInitialized {
-		return &BTree{rootPointer: InvalidBTreePointer, persistency: persistency, minimumDegree: 3}, nil
+		tree := BTree{rootPointer: InvalidBTreePointer, persistency: persistency, minimumDegree: 3}
+		persistency.PersistTree(&tree)
+		return &tree, nil
 	}
 	if err != nil {
 		return nil, err
