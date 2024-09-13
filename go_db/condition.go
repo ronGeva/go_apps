@@ -36,8 +36,9 @@ type conditionNode struct {
 }
 
 var SUPPORTED_CONDITIONS = map[FieldType][]conditionType{
-	FieldTypeInt:  {ConditionTypeEqual, ConditionTypeLess, ConditionTypeGreater},
-	FieldTypeBlob: {ConditionTypeEqual},
+	FieldTypeInt:    {ConditionTypeEqual, ConditionTypeLess, ConditionTypeGreater},
+	FieldTypeBlob:   {ConditionTypeEqual},
+	FieldTypeString: {ConditionTypeEqual},
 }
 
 var OPEATOR_FUNCS = map[conditionOperator]func(values []bool) bool{
@@ -93,6 +94,10 @@ func checkEqual(f Field, data []byte) (bool, error) {
 		blobField, ok := f.(BlobField)
 		assert(ok, "Failed to downcase BlobField")
 		return bytes.Equal(blobField.Data, data), nil
+	case FieldTypeString:
+		stringField, ok := f.(StringField)
+		assert(ok, "Failed to downcast StringField")
+		return stringField.Value == string(data), nil
 	default:
 		return false, fmt.Errorf("illegal condition")
 	}

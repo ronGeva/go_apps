@@ -90,6 +90,27 @@ func buildTable2() (database, string) {
 	return buildTableWithDbPath2(dbPath)
 }
 
+func buildTableWithDbPath3(dbPath string) (database, string) {
+	db, tableID := initializeTestDB(dbPath)
+
+	firstColumn := columndHeader{"IDColumn", FieldTypeInt, nil, 0}
+	secondColumn := columndHeader{"NameColumn", FieldTypeString, nil, 0}
+	scheme := tableScheme{[]columndHeader{firstColumn, secondColumn}}
+	writeNewTable(db, tableID, scheme)
+	fields := []Field{&IntField{11}, &StringField{"myname"}}
+	newRecord := MakeRecord(fields)
+	addRecordToTable(db, tableID, newRecord)
+	fields = []Field{&IntField{1001}, &StringField{"othername"}}
+	newRecord = MakeRecord(fields)
+	addRecordToTable(db, tableID, newRecord)
+	return db, tableID
+}
+
+func buildTable3() (database, string) {
+	dbPath := "C:\\temp\\my_db"
+	return buildTableWithDbPath3(dbPath)
+}
+
 func getConnectionTable2() (*testContext, error) {
 	db, tableID := buildTable2()
 	dbPath := db.id.identifyingString
@@ -445,8 +466,8 @@ func TestUpdateRecordsViaCondition(t *testing.T) {
 	}
 }
 
-func TestCursorUpdate1(t *testing.T) {
-	db, tableID := buildTable2()
+// reads all records, performs an update, then makes sure the new records are as expected
+func CursorUpdateHelper(t *testing.T, db database, tableID string, query string, expectedRecords []Record) {
 	dbPath := db.id.identifyingString
 	recordsBefore := readAllRecords(db, tableID)
 	if len(recordsBefore) != 2 {
@@ -458,25 +479,43 @@ func TestCursorUpdate1(t *testing.T) {
 		t.Fail()
 	}
 	cursor := conn.OpenCursor()
-	err = cursor.Execute("update newTable set columnA=33,columnB=89 where columnA=5")
+	err = cursor.Execute(query)
 	if err != nil {
 		t.Fail()
 	}
 
 	recordsAfter := readAllRecords(db, tableID)
 	// Sanity
-	if len(recordsAfter) != 2 {
+	if len(recordsAfter) != len(expectedRecords) {
 		t.Fail()
 	}
 
-	if !areRecordsEqual(recordsBefore[1], recordsAfter[1]) {
-		t.Fail() // unintended change
+	for i := 0; i < len(expectedRecords); i++ {
+		if !areRecordsEqual(recordsAfter[i], expectedRecords[i]) {
+			t.Fail()
+		}
 	}
+}
 
-	expectedFirstRecord := Record{[]Field{IntField{33}, IntField{89}}}
-	if !areRecordsEqual(expectedFirstRecord, recordsAfter[0]) {
-		t.Fail()
-	}
+func TestCursorUpdate1(t *testing.T) {
+	db, tableID := buildTable2()
+	records := readAllRecords(db, tableID)
+
+	// we will change this record and this record only
+	records[0] = Record{[]Field{IntField{33}, IntField{89}}}
+	CursorUpdateHelper(t, db, tableID, "update newTable set columnA=33,columnB=89 where columnA=5", records)
+}
+
+func TestCursorUpdate2(t *testing.T) {
+	db, tableID := buildTable3()
+	records := readAllRecords(db, tableID)
+
+	// we will change this record and this record only
+	records[1] = Record{[]Field{IntField{15}, StringField{"wowname"}}}
+
+	CursorUpdateHelper(t, db, tableID,
+		"update newTable set IDColumn=15, NameColumn=\"wowname\" where NameColumn=\"othername\"",
+		records)
 }
 
 func TestCannotCreateTheSameTableTwice(t *testing.T) {
