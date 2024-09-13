@@ -56,8 +56,8 @@ func (api *persistencyApi) LoadNode(pointer BTreePointer) *bTreeNode {
 	for i := 0; i < int(amountOfNodePointers); i++ {
 		nodePointer := binary.LittleEndian.Uint64(data[17+i*16 : 17+i*16+8])
 		nodeKey := binary.LittleEndian.Uint64(data[17+i*16+8 : 17+(i+1)*16])
-		nodePointers[i] = BTreeKeyPointerPair{pointer: BTreePointer(nodePointer),
-			key: bTreeKeyType(nodeKey)}
+		nodePointers[i] = BTreeKeyPointerPair{Pointer: BTreePointer(nodePointer),
+			Key: BTreeKeyType(nodeKey)}
 	}
 
 	return &bTreeNode{isInternal: isInternal, maximumDegree: int(maximumDegree),
@@ -77,8 +77,8 @@ func (api *persistencyApi) PersistNode(node *bTreeNode, pointer BTreePointer) BT
 	binary.LittleEndian.PutUint32(data[13:17], uint32(len(node.nodePointers)))
 	for i := 0; i < len(node.nodePointers); i++ {
 		p := node.nodePointers[i]
-		binary.LittleEndian.PutUint64(data[17+i*16:17+i*16+8], uint64(p.pointer))
-		binary.LittleEndian.PutUint64(data[17+i*16+8:17+(i+1)*16], uint64(p.key))
+		binary.LittleEndian.PutUint64(data[17+i*16:17+i*16+8], uint64(p.Pointer))
+		binary.LittleEndian.PutUint64(data[17+i*16+8:17+(i+1)*16], uint64(p.Key))
 	}
 
 	pointer, _ = api.store.Persist(data, pointer)

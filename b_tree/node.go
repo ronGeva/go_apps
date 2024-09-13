@@ -6,8 +6,8 @@ const InvalidBTreePointer BTreePointer = -1
 
 // Each pointer-value pair indicate a node with a values starting with that value
 type BTreeKeyPointerPair struct {
-	pointer BTreePointer
-	key     bTreeKeyType
+	Pointer BTreePointer
+	Key     BTreeKeyType
 }
 
 type bTreeNode struct {
@@ -50,7 +50,7 @@ func (node *bTreeNode) halfEmpty() bool {
 // Returns the new pointer of the current node (it is guranteed to be changed and therefore persisted during this
 // function).
 func (node *bTreeNode) splitChild(childIndex int) BTreePointer {
-	leftNode := node.persistency.LoadNode(node.nodePointers[childIndex].pointer)
+	leftNode := node.persistency.LoadNode(node.nodePointers[childIndex].Pointer)
 	rightNode := initializeBTreeNodeFromBrother(leftNode)
 
 	// Split the leftNode in the middle, put the bigger values into the right node
@@ -64,7 +64,7 @@ func (node *bTreeNode) splitChild(childIndex int) BTreePointer {
 	leftNode.nextNode = rightPointer
 
 	// Add a pointer to the right child
-	newValue := BTreeKeyPointerPair{key: rightNode.nodePointers[0].key, pointer: rightPointer}
+	newValue := BTreeKeyPointerPair{Key: rightNode.nodePointers[0].Key, Pointer: rightPointer}
 	// Treat this node as if it was a leaf and just insert the value "as is" into it
 	node.insertNonFullLeaf(newValue)
 
@@ -96,27 +96,27 @@ func (node *bTreeNode) stealFromBrother(brother *bTreeNode, isPrev bool) {
 // with one of his brother/this node
 func (node *bTreeNode) fill(childIndex int) {
 	innerNodePointer := node.nodePointers[childIndex]
-	innerNode := node.persistency.LoadNode(innerNodePointer.pointer)
+	innerNode := node.persistency.LoadNode(innerNodePointer.Pointer)
 
 	var leftNode *bTreeNode = nil
 	var rightNode *bTreeNode = nil
 
 	if childIndex > 0 {
-		leftNode = node.persistency.LoadNode(node.nodePointers[childIndex-1].pointer)
+		leftNode = node.persistency.LoadNode(node.nodePointers[childIndex-1].Pointer)
 	}
 	if childIndex < len(node.nodePointers)-1 {
-		rightNode = node.persistency.LoadNode(node.nodePointers[childIndex+1].pointer)
+		rightNode = node.persistency.LoadNode(node.nodePointers[childIndex+1].Pointer)
 	}
 
 	if leftNode != nil && !leftNode.halfEmpty() {
 		innerNode.stealFromBrother(leftNode, true)
-		node.nodePointers[childIndex].key = innerNode.nodePointers[0].key
+		node.nodePointers[childIndex].Key = innerNode.nodePointers[0].Key
 		return
 	}
 
 	if rightNode != nil && !rightNode.halfEmpty() {
 		innerNode.stealFromBrother(rightNode, false)
-		node.nodePointers[childIndex+1].key = rightNode.nodePointers[0].key
+		node.nodePointers[childIndex+1].Key = rightNode.nodePointers[0].Key
 		return
 	}
 
@@ -154,13 +154,13 @@ func (node *bTreeNode) fill(childIndex int) {
 
 func (node *bTreeNode) findMatchingNodeIndex(item BTreeKeyPointerPair) int {
 	// If the key is smaller than everything in this node, return the smallest child node
-	if item.key <= node.nodePointers[0].key {
+	if item.Key <= node.nodePointers[0].Key {
 		return 0
 	}
 
 	for i := 1; i < len(node.nodePointers); i++ {
 		innerNodePointer := node.nodePointers[i]
-		if item.key < innerNodePointer.key {
+		if item.Key < innerNodePointer.Key {
 			// everthing in the current node is bigger than key, return the previous node
 			return i - 1
 		}
@@ -173,7 +173,7 @@ func (node *bTreeNode) findMatchingNodeIndex(item BTreeKeyPointerPair) int {
 func (node *bTreeNode) findMatchingNode(item BTreeKeyPointerPair) (*bTreeNode, int) {
 	innerNodeIndex := node.findMatchingNodeIndex(item)
 	innerNodePointer := node.nodePointers[innerNodeIndex]
-	return node.persistency.LoadNode(innerNodePointer.pointer), innerNodeIndex
+	return node.persistency.LoadNode(innerNodePointer.Pointer), innerNodeIndex
 }
 
 func (node *bTreeNode) findMatchingNodeInsert(item BTreeKeyPointerPair) *bTreeNode {
@@ -206,8 +206,8 @@ func (node *bTreeNode) insertNonFullInternal(item BTreeKeyPointerPair) {
 	innerNode.insertNonFull(item)
 
 	// New item changes the minimal value of this nodes' children, reflect that in node pointers
-	if item.key < node.nodePointers[0].key {
-		node.nodePointers[0].key = item.key
+	if item.Key < node.nodePointers[0].Key {
+		node.nodePointers[0].Key = item.Key
 		node.persist()
 	}
 }
@@ -219,7 +219,7 @@ func (node *bTreeNode) insertNonFullLeaf(item BTreeKeyPointerPair) {
 	i := len(node.nodePointers) - 1
 	// move all keys bigger than the new item one location forward
 	for ; i > 0; i-- {
-		if item.key >= node.nodePointers[i-1].key {
+		if item.Key >= node.nodePointers[i-1].Key {
 			break // found the location for the new item
 		}
 
@@ -265,8 +265,8 @@ func (node *bTreeNode) remove(item BTreeKeyPointerPair) bool {
 		removed = innerNode.remove(item)
 
 		// if the inner node's smallest key has changed, update it in the parent
-		if removed && node.nodePointers[index].key == item.key {
-			node.nodePointers[index].key = innerNode.nodePointers[0].key
+		if removed && node.nodePointers[index].Key == item.Key {
+			node.nodePointers[index].Key = innerNode.nodePointers[0].Key
 			node.persist()
 		}
 	} else {

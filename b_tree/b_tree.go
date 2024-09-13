@@ -9,7 +9,7 @@ import (
 // Negative BTreePointer values are used internally by the b_tree module and should
 // never be used by external code (such as the persistency interface)
 type BTreePointer int64
-type bTreeKeyType int
+type BTreeKeyType int
 
 var BTreeErrorNotFound error = errors.New("item not found")
 
@@ -78,7 +78,7 @@ func (tree *BTree) Insert(item BTreeKeyPointerPair) error {
 		newRoot := initializeBTreeNodeFromBrother(root)
 		// new root isn't a leaf anymore, it is internal
 		newRoot.isInternal = true
-		oldRootPointer := BTreeKeyPointerPair{key: root.nodePointers[0].key, pointer: tree.rootPointer}
+		oldRootPointer := BTreeKeyPointerPair{Key: root.nodePointers[0].Key, Pointer: tree.rootPointer}
 		newRoot.nodePointers = append(newRoot.nodePointers, oldRootPointer)
 
 		// now split the old root from the perspective of the new one
@@ -126,7 +126,7 @@ func (tree *BTree) Iterator() *BTreeIterator {
 
 	// traverse the leftside of the tree until we've reached a leaf node
 	for currentNode.isInternal {
-		currentNode = tree.persistency.LoadNode(currentNode.nodePointers[0].pointer)
+		currentNode = tree.persistency.LoadNode(currentNode.nodePointers[0].Pointer)
 	}
 	// reached an internal node
 	return &BTreeIterator{currentNode: currentNode, offsetInNode: 0, tree: tree}

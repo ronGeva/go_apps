@@ -15,7 +15,7 @@ func (pairs *bTreePairArray) Len() int {
 }
 
 func (pairs *bTreePairArray) Less(i, j int) bool {
-	return pairs.pairs[i].key < pairs.pairs[j].key
+	return pairs.pairs[i].Key < pairs.pairs[j].Key
 }
 
 func (pairs *bTreePairArray) Swap(i, j int) {
@@ -36,7 +36,7 @@ func TestInsertionSanity(t *testing.T) {
 	}
 
 	for i := 0; i < 100; i++ {
-		pair := BTreeKeyPointerPair{pointer: BTreePointer(i), key: bTreeKeyType(i)}
+		pair := BTreeKeyPointerPair{Pointer: BTreePointer(i), Key: BTreeKeyType(i)}
 		tree.Insert(pair)
 	}
 }
@@ -50,15 +50,15 @@ func TestInsertThenIterate(t *testing.T) {
 	}
 
 	for i := 0; i < 100; i++ {
-		pair := BTreeKeyPointerPair{pointer: BTreePointer(i), key: bTreeKeyType(i)}
+		pair := BTreeKeyPointerPair{Pointer: BTreePointer(i), Key: BTreeKeyType(i)}
 		tree.Insert(pair)
 	}
 
 	iterator := tree.Iterator()
 	pair := iterator.Next()
-	i := bTreeKeyType(0)
+	i := BTreeKeyType(0)
 	for pair != nil {
-		if pair.key != i {
+		if pair.Key != i {
 			t.Fail()
 		}
 		i++
@@ -85,8 +85,8 @@ func TestInsertThenIterateRandomOrder(t *testing.T) {
 	for i := 0; i < len(pairs); i++ {
 		randomNumber := rand.Intn(randomRange)
 		values[i] = randomNumber
-		pairs[i].key = bTreeKeyType(randomNumber)
-		pairs[i].pointer = BTreePointer(i)
+		pairs[i].Key = BTreeKeyType(randomNumber)
+		pairs[i].Pointer = BTreePointer(i)
 		tree.Insert(pairs[i])
 	}
 
@@ -97,7 +97,7 @@ func TestInsertThenIterateRandomOrder(t *testing.T) {
 	pair := iterator.Next()
 	for pair != nil {
 		iteratorOutput = append(iteratorOutput, *pair)
-		if pair.key != bTreeKeyType(values[len(iteratorOutput)-1]) {
+		if pair.Key != BTreeKeyType(values[len(iteratorOutput)-1]) {
 			t.Fail()
 		}
 		pair = iterator.Next()
@@ -114,7 +114,7 @@ func TestSingleInsertThenDelete(t *testing.T) {
 		t.Fail()
 	}
 
-	item := BTreeKeyPointerPair{pointer: BTreePointer(5), key: bTreeKeyType(12)}
+	item := BTreeKeyPointerPair{Pointer: BTreePointer(5), Key: BTreeKeyType(12)}
 	tree.Insert(item)
 	tree.Delete(item)
 
@@ -136,8 +136,8 @@ func TestMultipleInsertThenPartialDelete(t *testing.T) {
 	pairs := bTreePairArray{}
 	for i := 0; i < amount; i++ {
 		randomNumber := rand.Intn(randomRange)
-		pairs.pairs = append(pairs.pairs, BTreeKeyPointerPair{key: bTreeKeyType(randomNumber),
-			pointer: BTreePointer(i)})
+		pairs.pairs = append(pairs.pairs, BTreeKeyPointerPair{Key: BTreeKeyType(randomNumber),
+			Pointer: BTreePointer(i)})
 		tree.Insert(pairs.pairs[i])
 	}
 
@@ -155,7 +155,7 @@ func TestMultipleInsertThenPartialDelete(t *testing.T) {
 	pair := iterator.Next()
 	for pair != nil {
 		iteratorOutput = append(iteratorOutput, *pair)
-		if pair.key != pairs.pairs[len(iteratorOutput)-1].key {
+		if pair.Key != pairs.pairs[len(iteratorOutput)-1].Key {
 			t.Fail()
 		}
 		pair = iterator.Next()
@@ -226,7 +226,7 @@ func areNodesEqual(left *bTreeNode, right *bTreeNode) bool {
 func TestPersistencySanity(t *testing.T) {
 	dummyPointer := BTreePointer(105)
 	persistency := persistencyApi{store: &dummyPersistencyStore{}}
-	pointers := []BTreeKeyPointerPair{{pointer: 11, key: 5}, {pointer: 55, key: 37}}
+	pointers := []BTreeKeyPointerPair{{Pointer: 11, Key: 5}, {Pointer: 55, Key: 37}}
 	node := bTreeNode{isInternal: true, maximumDegree: 17, persistency: persistency,
 		nextNode: 101, nodePointers: pointers, selfPointer: dummyPointer}
 	persistency.PersistNode(&node, dummyPointer)
@@ -240,7 +240,7 @@ func TestPersistencySanity(t *testing.T) {
 func TestPersistencyInMemoryStore(t *testing.T) {
 	dummyPointer := BTreePointer(105)
 	persistency := persistencyApi{store: InitializeInMemoryPersistency()}
-	pointers := []BTreeKeyPointerPair{{pointer: 11, key: 5}, {pointer: 55, key: 37}}
+	pointers := []BTreeKeyPointerPair{{Pointer: 11, Key: 5}, {Pointer: 55, Key: 37}}
 	node := bTreeNode{isInternal: true, maximumDegree: 17, persistency: persistency,
 		nextNode: 101, nodePointers: pointers, selfPointer: dummyPointer}
 	persistency.PersistNode(&node, dummyPointer)
@@ -266,7 +266,7 @@ func TestMultipleInitializationSanity(t *testing.T) {
 
 	iterator := tree.Iterator()
 	pair := iterator.Next()
-	if pair.key != 2 || pair.pointer != 1 {
+	if pair.Key != 2 || pair.Pointer != 1 {
 		t.Fail()
 	}
 }
