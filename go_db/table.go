@@ -211,25 +211,37 @@ func parseTableHeaders(db *openDB, tablePointer dbPointer) tableHeaders {
 	}
 }
 
-func addRecordToTableInternal(db *openDB, tablePointer dbPointer, record Record) {
+func addRecordToTableInternal(db *openDB, tablePointer dbPointer, record Record) uint32 {
 	headers := parseTableHeaders(db, tablePointer)
 	bitmapData := readAllDataFromDbPointer(db, headers.bitmap.pointer)
 	firstAvailableRecordNum := findFirstAvailableBlock(bitmapData)
 
 	writeRecordToTable(db, headers, firstAvailableRecordNum, record)
 	writeBitToBitmap(db, int64(headers.bitmap.location), firstAvailableRecordNum, 1)
+
+	return firstAvailableRecordNum
 }
 
-func addRecordOpenDb(db *openDB, tableID string, record Record) {
+func addRecordOpenDb(db *openDB, tableID string, record Record) uint32 {
 	tablePointer, err := findTable(db, tableID)
 	check(err)
-	addRecordToTableInternal(db, *tablePointer, record)
+	return addRecordToTableInternal(db, *tablePointer, record)
 }
 
-func addRecordToTable(db database, tableID string, record Record) {
+// returns the record index in the table
+func addRecordToTable(db database, tableID string, record Record) uint32 {
 	openDatabse := getOpenDB(db)
 	defer closeOpenDB(&openDatabse)
-	addRecordOpenDb(&openDatabse, tableID, record)
+	return addRecordOpenDb(&openDatabse, tableID, record)
+}
+
+func getRecordFromOffset(db *openDB, headers *tableHeaders, offset uint32) Record {
+	tableScheme := headers.scheme
+	sizeOfRecord := int(DB_POINTER_SIZE) * len(tableScheme.columns)
+
+	recordData := readFromDbPointer(db, headers.records.pointer,
+		uint32(sizeOfRecord), offset*uint32(sizeOfRecord))
+	return deserializeRecord(db, recordData, headers.scheme)
 }
 
 func readAllRecords(db database, tableID string) []Record {
@@ -241,14 +253,13 @@ func readAllRecords(db database, tableID string) []Record {
 	headers := parseTableHeaders(&openDatabse, *tablePointer)
 
 	tableScheme := headers.scheme
-	recordsData := readAllDataFromDbPointer(&openDatabse, headers.records.pointer)
 	bitmapData := readAllDataFromDbPointer(&openDatabse, headers.bitmap.pointer)
 	records := make([]Record, 0)
 	sizeOfRecord := int(DB_POINTER_SIZE) * len(tableScheme.columns)
-	for i := 0; i < len(recordsData)/sizeOfRecord; i++ {
+	for i := 0; i < int(headers.records.pointer.size)/sizeOfRecord; i++ {
 		if checkBitFromData(bitmapData, i) {
-			recordData := recordsData[i*sizeOfRecord : (i+1)*sizeOfRecord]
-			records = append(records, deserializeRecord(&openDatabse, recordData, tableScheme))
+			record := getRecordFromOffset(&openDatabse, &headers, uint32(i))
+			records = append(records, record)
 		}
 	}
 
@@ -310,7 +321,15 @@ func deleteRecord(db database, tableID string, recordIndex uint32) error {
 		return err
 	}
 
-	return deleteRecordInternal(&openDatabse, *headers, &recordForChange{index: recordIndex})
+	keys := headers.scheme.indexedColumns()
+	keyFields := make([]Field, 0)
+	if len(keys) > 0 {
+		record := getRecordFromOffset(&openDatabse, headers, recordIndex)
+		for i := 0; i < len(keys); i++ {
+			keyFields = append(keyFields, record.Fields[keys[i]])
+		}
+	}
+	return deleteRecordInternal(&openDatabse, *headers, &recordForChange{index: recordIndex, keys: keyFields})
 }
 
 func validateConditions(scheme tableScheme, recordsCondition conditionNode) bool {

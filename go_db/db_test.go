@@ -130,12 +130,6 @@ func buildTable4() (database, string) {
 	closeOpenDB(&openDatabse)
 
 	writeNewTable(db, tableID, scheme)
-	fields := []Field{&IntField{1050}, &StringField{"myname"}, &IntField{555}}
-	newRecord := MakeRecord(fields)
-	addRecordToTable(db, tableID, newRecord)
-	fields = []Field{&IntField{1001}, &StringField{"othername"}, &IntField{137}}
-	newRecord = MakeRecord(fields)
-	addRecordToTable(db, tableID, newRecord)
 	return db, tableID
 }
 
@@ -697,10 +691,18 @@ func TestInMemoryBuffer(t *testing.T) {
 	}
 }
 
+// initialize
 func TestIndexSanity(t *testing.T) {
-	db, tableId := buildTable4()
+	db, tableID := buildTable4()
+	fields := []Field{&IntField{1050}, &StringField{"myname"}, &IntField{555}}
+	newRecord := MakeRecord(fields)
+	addRecordToTable(db, tableID, newRecord)
+	fields = []Field{&IntField{1001}, &StringField{"othername"}, &IntField{137}}
+	newRecord = MakeRecord(fields)
+	addRecordToTable(db, tableID, newRecord)
+
 	openDb := getOpenDB(db)
-	headers, err := getTableHeaders(&openDb, tableId)
+	headers, err := getTableHeaders(&openDb, tableID)
 	if err != nil {
 		t.Fail()
 	}
@@ -719,8 +721,13 @@ func TestIndexSanity(t *testing.T) {
 	}
 }
 
+type testRecord struct {
+	record Record
+	offset uint32
+}
+
 type recordsComparableByKey struct {
-	records []Record
+	records []testRecord
 	key     int
 }
 
@@ -729,8 +736,8 @@ func (records *recordsComparableByKey) Len() int {
 }
 
 func (records *recordsComparableByKey) Less(i, j int) bool {
-	leftKey := records.records[i].Fields[records.key].ToKey()
-	rightKey := records.records[j].Fields[records.key].ToKey()
+	leftKey := records.records[i].record.Fields[records.key].ToKey()
+	rightKey := records.records[j].record.Fields[records.key].ToKey()
 	return *leftKey < *rightKey
 }
 
@@ -740,27 +747,35 @@ func (records *recordsComparableByKey) Swap(i, j int) {
 	records.records[j] = temp
 }
 
-func TestIndexAddManyRecords(t *testing.T) {
+func IndexAddAndRemoveHelper(t *testing.T, recordsToAdd []Record, recordsToDelete []Record) {
 	db, tableID := buildTable4()
-	records := recordsComparableByKey{records: make([]Record, 0), key: 0}
+	records := recordsComparableByKey{records: make([]testRecord, 0), key: 0}
 
-	// first, add the fields that are already in the database
-	records.records = append(records.records,
-		MakeRecord([]Field{&IntField{1050}, &StringField{"myname"}, &IntField{555}}))
-	records.records = append(records.records,
-		MakeRecord([]Field{&IntField{1001}, &StringField{"othername"}, &IntField{137}}))
-
-	for i := 0; i < 1000; i++ {
-		firstInt := rand.Intn(10000)
-		secondInt := rand.Intn(1000)
-		randomBuffer := make([]byte, 200)
-		// the documentation pretty much gurantees this function will always succeed, no need to check return value
-		rand.Read(randomBuffer)
-		record := MakeRecord([]Field{&IntField{firstInt}, &StringField{string(randomBuffer)}, &IntField{secondInt}})
-		records.records = append(records.records, record)
-		addRecordToTable(db, tableID, record)
+	for i := 0; i < len(recordsToAdd); i++ {
+		record := recordsToAdd[i]
+		offset := addRecordToTable(db, tableID, record)
+		records.records = append(records.records, testRecord{record: record, offset: offset})
 	}
 
+	for i := 0; i < len(recordsToDelete); i++ {
+		found := false
+		for j := 0; j < records.Len(); j++ {
+			if areRecordsEqual(recordsToDelete[i], records.records[j].record) {
+				record := records.records[j]
+				// remove record
+				records.records = append(records.records[:j], records.records[j+1:]...)
+				err := deleteRecord(db, tableID, record.offset)
+				if err != nil {
+					t.Fail()
+				}
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fail()
+		}
+	}
 	sort.Sort(&records)
 
 	openDb := getOpenDB(db)
@@ -786,8 +801,58 @@ func TestIndexAddManyRecords(t *testing.T) {
 	}
 
 	for i := 0; i < len(pairs); i++ {
-		if pairs[i].Key != *records.records[i].Fields[0].ToKey() {
+		if pairs[i].Key != *records.records[i].record.Fields[0].ToKey() {
 			t.Fail()
 		}
 	}
+}
+
+// Function to generate a unique random number
+func generateUniqueNumber(seenNumbers map[int]bool, maxNumber int) int {
+	for {
+		// Generate a random number between 0 and maxNumber-1
+		num := rand.Intn(maxNumber)
+
+		// Check if the number has already been seen
+		if !seenNumbers[num] {
+			// Mark the number as seen and return it
+			seenNumbers[num] = true
+			return num
+		}
+	}
+}
+
+func generateRandomRecordForTable4(seenNumbers map[int]bool) Record {
+	firstInt := generateUniqueNumber(seenNumbers, 10000)
+	secondInt := rand.Intn(1000)
+	randomBuffer := make([]byte, 200)
+	// the documentation pretty much gurantees this function will always succeed, no need to check return value
+	rand.Read(randomBuffer)
+	return MakeRecord([]Field{&IntField{firstInt}, &StringField{string(randomBuffer)}, &IntField{secondInt}})
+}
+
+func TestIndexAddManyRecords(t *testing.T) {
+	recordsToAdd := make([]Record, 0)
+	seenNumbers := make(map[int]bool)
+
+	for i := 0; i < 1000; i++ {
+		record := generateRandomRecordForTable4(seenNumbers)
+		recordsToAdd = append(recordsToAdd, record)
+	}
+
+	IndexAddAndRemoveHelper(t, recordsToAdd, make([]Record, 0))
+}
+
+func TestIndexAddAndRemoveManyRecords(t *testing.T) {
+	recordsToAdd := make([]Record, 0)
+	seenNumbers := make(map[int]bool)
+
+	for i := 0; i < 1000; i++ {
+		record := generateRandomRecordForTable4(seenNumbers)
+		recordsToAdd = append(recordsToAdd, record)
+	}
+
+	recordsToDelete := recordsToAdd[100:300]
+
+	IndexAddAndRemoveHelper(t, recordsToAdd, recordsToDelete)
 }
