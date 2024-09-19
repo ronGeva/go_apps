@@ -70,6 +70,21 @@ func TestInsertThenIterate(t *testing.T) {
 	}
 }
 
+// Function to generate a unique random number
+func generateUniqueNumber(seenNumbers map[int]bool, maxNumber int) int {
+	for {
+		// Generate a random number between 0 and maxNumber-1
+		num := rand.Intn(maxNumber)
+
+		// Check if the number has already been seen
+		if !seenNumbers[num] {
+			// Mark the number as seen and return it
+			seenNumbers[num] = true
+			return num
+		}
+	}
+}
+
 // insert 10000 random entries, then iterate them in order and make sure we get the correct results
 func TestInsertThenIterateRandomOrder(t *testing.T) {
 	tree, error := initializeInMemoryBTree()
@@ -77,13 +92,15 @@ func TestInsertThenIterateRandomOrder(t *testing.T) {
 		t.Fail()
 	}
 
+	// Create a map to store the numbers we've seen
+	seenNumbers := make(map[int]bool)
 	amount := 10000
 	randomRange := 100000
 
 	pairs := make([]BTreeKeyPointerPair, amount)
 	values := make([]int, amount)
 	for i := 0; i < len(pairs); i++ {
-		randomNumber := rand.Intn(randomRange)
+		randomNumber := generateUniqueNumber(seenNumbers, randomRange)
 		values[i] = randomNumber
 		pairs[i].Key = BTreeKeyType(randomNumber)
 		pairs[i].Pointer = BTreePointer(i)
@@ -130,12 +147,14 @@ func TestMultipleInsertThenPartialDelete(t *testing.T) {
 		t.Fail()
 	}
 
+	// Create a map to store the numbers we've seen
+	seenNumbers := make(map[int]bool)
 	amount := 1000
 	randomRange := 100000
 
 	pairs := bTreePairArray{}
 	for i := 0; i < amount; i++ {
-		randomNumber := rand.Intn(randomRange)
+		randomNumber := generateUniqueNumber(seenNumbers, randomRange)
 		pairs.pairs = append(pairs.pairs, BTreeKeyPointerPair{Key: BTreeKeyType(randomNumber),
 			Pointer: BTreePointer(i)})
 		tree.Insert(pairs.pairs[i])
@@ -268,5 +287,63 @@ func TestMultipleInitializationSanity(t *testing.T) {
 	pair := iterator.Next()
 	if pair.Key != 2 || pair.Pointer != 1 {
 		t.Fail()
+	}
+}
+
+func TestEnforceNoDuplicatesSmallTree(t *testing.T) {
+	store := InitializeInMemoryPersistency()
+	tree, err := InitializeBTree(store)
+	if err != nil {
+		t.Fail()
+	}
+
+	// both of those pairs have the same key
+	firstPair := BTreeKeyPointerPair{1, 2}
+	secondPair := BTreeKeyPointerPair{11, 2}
+	err = tree.Insert(firstPair)
+	if err != nil {
+		t.Fail()
+	}
+
+	err = tree.Insert(secondPair)
+	if err != BTreeErrorKeyAlreadyExists {
+		t.Fail()
+	}
+}
+
+func insertRandomPairsIntoTree(tree *BTree, amount int, t *testing.T) []BTreeKeyPointerPair {
+	// Create a map to store the numbers we've seen
+	seenNumbers := make(map[int]bool)
+
+	// this should help reduce the chance of collison
+	randomRange := amount * 100
+
+	pairs := make([]BTreeKeyPointerPair, 0)
+	for i := 0; i < amount; i++ {
+		randomNumber := generateUniqueNumber(seenNumbers, randomRange)
+		pairs = append(pairs, BTreeKeyPointerPair{Key: BTreeKeyType(randomNumber),
+			Pointer: BTreePointer(i)})
+		err := tree.Insert(pairs[i])
+		if err != nil {
+			t.FailNow()
+		}
+	}
+
+	return pairs
+}
+
+func TestEnforceNoDuplicatesBigTree(t *testing.T) {
+	store := InitializeInMemoryPersistency()
+	tree, err := InitializeBTree(store)
+	if err != nil {
+		t.Fail()
+	}
+
+	pairs := insertRandomPairsIntoTree(tree, 1000, t)
+	pairToChoose := rand.Intn(len(pairs) - 1)
+	pairToChooseKey := pairs[pairToChoose].Key
+	err = tree.Insert(BTreeKeyPointerPair{Pointer: 100, Key: pairToChooseKey})
+	if err != BTreeErrorKeyAlreadyExists {
+		t.FailNow()
 	}
 }

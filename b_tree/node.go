@@ -4,6 +4,8 @@ import "errors"
 
 const InvalidBTreePointer BTreePointer = -1
 
+var BTreeErrorKeyAlreadyExists error = errors.New("item's key is already in the tree")
+
 // Each pointer-value pair indicate a node with a values starting with that value
 type BTreeKeyPointerPair struct {
 	Pointer BTreePointer
@@ -201,24 +203,33 @@ func (node *bTreeNode) findMatchingNodeDelete(item BTreeKeyPointerPair) (*bTreeN
 	return innerNode, innerNodeIndex
 }
 
-func (node *bTreeNode) insertNonFullInternal(item BTreeKeyPointerPair) {
+func (node *bTreeNode) insertNonFullInternal(item BTreeKeyPointerPair) error {
 	innerNode := node.findMatchingNodeInsert(item)
-	innerNode.insertNonFull(item)
+	err := innerNode.insertNonFull(item)
+	if err != nil {
+		return err
+	}
 
 	// New item changes the minimal value of this nodes' children, reflect that in node pointers
 	if item.Key < node.nodePointers[0].Key {
 		node.nodePointers[0].Key = item.Key
 		node.persist()
 	}
+
+	return nil
 }
 
-func (node *bTreeNode) insertNonFullLeaf(item BTreeKeyPointerPair) {
+func (node *bTreeNode) insertNonFullLeaf(item BTreeKeyPointerPair) error {
 	// allocate space for one additional element
 	node.nodePointers = append(node.nodePointers, node.nodePointers[len(node.nodePointers)-1])
 
 	i := len(node.nodePointers) - 1
 	// move all keys bigger than the new item one location forward
 	for ; i > 0; i-- {
+		if item.Key == node.nodePointers[i-1].Key {
+			return BTreeErrorKeyAlreadyExists
+		}
+
 		if item.Key >= node.nodePointers[i-1].Key {
 			break // found the location for the new item
 		}
@@ -230,13 +241,15 @@ func (node *bTreeNode) insertNonFullLeaf(item BTreeKeyPointerPair) {
 	node.nodePointers[i] = item
 	// node was changed, persist it
 	node.persist()
+
+	return nil
 }
 
-func (node *bTreeNode) insertNonFull(item BTreeKeyPointerPair) {
+func (node *bTreeNode) insertNonFull(item BTreeKeyPointerPair) error {
 	if node.isInternal {
-		node.insertNonFullInternal(item)
+		return node.insertNonFullInternal(item)
 	} else {
-		node.insertNonFullLeaf(item)
+		return node.insertNonFullLeaf(item)
 	}
 }
 

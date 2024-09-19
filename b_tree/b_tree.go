@@ -66,7 +66,8 @@ func (tree *BTree) updateRootPointer(pointer BTreePointer) {
 
 func (tree *BTree) Insert(item BTreeKeyPointerPair) error {
 	if tree.rootPointer == InvalidBTreePointer {
-		// tree is empty, allocate root
+		// tree is empty, allocate root.
+		// this flow cannot fail - the tree is empty so there's no chance of duplication
 		root := initializeBTreeNode(5, false, tree.persistency)
 		root.nodePointers = append(root.nodePointers, item)
 		root.persist()
@@ -91,8 +92,7 @@ func (tree *BTree) Insert(item BTreeKeyPointerPair) error {
 	}
 
 	// root is not full, insert the new item
-	root.insertNonFull(item)
-	return nil
+	return root.insertNonFull(item)
 }
 
 func (tree *BTree) Delete(item BTreeKeyPointerPair) error {
