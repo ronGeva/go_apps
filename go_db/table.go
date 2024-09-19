@@ -157,7 +157,7 @@ func findTable(openDatabse *openDB, tableID string) (*dbPointer, error) {
 }
 
 // Adds a record to all the table's indexes
-func addRecordToIndexes(scheme *tableScheme, record Record, recordIndex uint32) {
+func addRecordToIndexes(scheme *tableScheme, record Record, recordIndex uint32) error {
 	for i := 0; i < len(scheme.columns); i++ {
 		column := scheme.columns[i]
 		if column.index == nil {
@@ -172,11 +172,17 @@ func addRecordToIndexes(scheme *tableScheme, record Record, recordIndex uint32) 
 
 		// recordIndex is the index of the record in the table's bitmap,
 		// which means we can easily figure out where the record is by using it
-		column.index.Insert(b_tree.BTreeKeyPointerPair{Pointer: b_tree.BTreePointer(recordIndex), Key: *key})
+		err := column.index.Insert(b_tree.BTreeKeyPointerPair{Pointer: b_tree.BTreePointer(recordIndex),
+			Key: *key})
+		if err != nil {
+			return err
+		}
 	}
+
+	return nil
 }
 
-func writeRecordToTable(db *openDB, headers tableHeaders, recordIndex uint32, record Record) {
+func writeRecordToTable(db *openDB, headers tableHeaders, recordIndex uint32, record Record) error {
 	// Find the offset of the new record
 	// TODO: handle data block extension
 	data := serializeRecord(db, record)
@@ -192,7 +198,7 @@ func writeRecordToTable(db *openDB, headers tableHeaders, recordIndex uint32, re
 		appendDataToDataBlock(db, data, uint32(recordsPointer.location))
 	}
 
-	addRecordToIndexes(&headers.scheme, record, recordIndex)
+	return addRecordToIndexes(&headers.scheme, record, recordIndex)
 }
 
 func parseTableHeaders(db *openDB, tablePointer dbPointer) tableHeaders {
@@ -211,25 +217,29 @@ func parseTableHeaders(db *openDB, tablePointer dbPointer) tableHeaders {
 	}
 }
 
-func addRecordToTableInternal(db *openDB, tablePointer dbPointer, record Record) uint32 {
+func addRecordToTableInternal(db *openDB, tablePointer dbPointer, record Record) (uint32, error) {
 	headers := parseTableHeaders(db, tablePointer)
 	bitmapData := readAllDataFromDbPointer(db, headers.bitmap.pointer)
 	firstAvailableRecordNum := findFirstAvailableBlock(bitmapData)
 
-	writeRecordToTable(db, headers, firstAvailableRecordNum, record)
+	err := writeRecordToTable(db, headers, firstAvailableRecordNum, record)
+	if err != nil {
+		return 0, err
+	}
+
 	writeBitToBitmap(db, int64(headers.bitmap.location), firstAvailableRecordNum, 1)
 
-	return firstAvailableRecordNum
+	return firstAvailableRecordNum, nil
 }
 
-func addRecordOpenDb(db *openDB, tableID string, record Record) uint32 {
+func addRecordOpenDb(db *openDB, tableID string, record Record) (uint32, error) {
 	tablePointer, err := findTable(db, tableID)
 	check(err)
 	return addRecordToTableInternal(db, *tablePointer, record)
 }
 
 // returns the record index in the table
-func addRecordToTable(db database, tableID string, record Record) uint32 {
+func addRecordToTable(db database, tableID string, record Record) (uint32, error) {
 	openDatabse := getOpenDB(db)
 	defer closeOpenDB(&openDatabse)
 	return addRecordOpenDb(&openDatabse, tableID, record)

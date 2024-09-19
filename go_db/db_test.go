@@ -133,6 +133,25 @@ func buildTable4() (database, string) {
 	return db, tableID
 }
 
+// initializes a database with multiple indexes
+func buildTable5() (database, string) {
+	dbPath := "C:\\temp\\my_db"
+
+	db, tableID := initializeTestDB(dbPath)
+
+	firstColumn := columndHeader{"IDColumn", FieldTypeInt, nil, dbPointer{0, 0}}
+	secondColumn := columndHeader{"NameColumn", FieldTypeString, nil, dbPointer{0, 0}}
+	thirdColumn := columndHeader{"intColumn2", FieldTypeInt, nil, dbPointer{0, 0}}
+	scheme := tableScheme{[]columndHeader{firstColumn, secondColumn, thirdColumn}}
+	openDatabse := getOpenDB(db)
+	initializeIndexInColumn(&openDatabse, &scheme, 0)
+	initializeIndexInColumn(&openDatabse, &scheme, 2)
+	closeOpenDB(&openDatabse)
+
+	writeNewTable(db, tableID, scheme)
+	return db, tableID
+}
+
 func getConnectionTable2() (*testContext, error) {
 	db, tableID := buildTable2()
 	dbPath := db.id.identifyingString
@@ -747,13 +766,43 @@ func (records *recordsComparableByKey) Swap(i, j int) {
 	records.records[j] = temp
 }
 
-func IndexAddAndRemoveHelper(t *testing.T, recordsToAdd []Record, recordsToDelete []Record) {
-	db, tableID := buildTable4()
+func assertIndexIteratorEqualToInsertedRecords(headers *tableHeaders, records recordsComparableByKey,
+	indexOffset int, t *testing.T) {
+	if headers.scheme.columns[indexOffset].index == nil {
+		t.Fail()
+	}
+
+	iterator := headers.scheme.columns[indexOffset].index.Iterator()
+	pairs := make([]b_tree.BTreeKeyPointerPair, 0)
+	pair := iterator.Next()
+	for pair != nil {
+		pairs = append(pairs, *pair)
+		pair = iterator.Next()
+	}
+
+	if len(pairs) != records.Len() {
+		t.Fail()
+	}
+
+	for i := 0; i < len(pairs); i++ {
+		if pairs[i].Key != *records.records[i].record.Fields[indexOffset].ToKey() {
+			t.Fail()
+		}
+	}
+}
+
+func IndexAddAndRemoveHelper(t *testing.T, recordsToAdd []Record, recordsToDelete []Record,
+	dbBuilder func() (database, string), indexOffsets []int) {
+	db, tableID := dbBuilder()
 	records := recordsComparableByKey{records: make([]testRecord, 0), key: 0}
 
 	for i := 0; i < len(recordsToAdd); i++ {
 		record := recordsToAdd[i]
-		offset := addRecordToTable(db, tableID, record)
+		offset, err := addRecordToTable(db, tableID, record)
+		if err != nil {
+			t.FailNow()
+		}
+
 		records.records = append(records.records, testRecord{record: record, offset: offset})
 	}
 
@@ -776,7 +825,6 @@ func IndexAddAndRemoveHelper(t *testing.T, recordsToAdd []Record, recordsToDelet
 			t.Fail()
 		}
 	}
-	sort.Sort(&records)
 
 	openDb := getOpenDB(db)
 	headers, err := getTableHeaders(&openDb, tableID)
@@ -784,26 +832,13 @@ func IndexAddAndRemoveHelper(t *testing.T, recordsToAdd []Record, recordsToDelet
 		t.Fail()
 	}
 
-	if headers.scheme.columns[0].index == nil {
-		t.Fail()
-	}
+	for i := 0; i < len(indexOffsets); i++ {
+		// sort the records according to the index
+		records.key = indexOffsets[i]
+		sort.Sort(&records)
 
-	iterator := headers.scheme.columns[0].index.Iterator()
-	pairs := make([]b_tree.BTreeKeyPointerPair, 0)
-	pair := iterator.Next()
-	for pair != nil {
-		pairs = append(pairs, *pair)
-		pair = iterator.Next()
-	}
-
-	if len(pairs) != records.Len() {
-		t.Fail()
-	}
-
-	for i := 0; i < len(pairs); i++ {
-		if pairs[i].Key != *records.records[i].record.Fields[0].ToKey() {
-			t.Fail()
-		}
+		// make sure the index iterator returns the same pairs, in the correct order
+		assertIndexIteratorEqualToInsertedRecords(headers, records, indexOffsets[i], t)
 	}
 }
 
@@ -831,6 +866,15 @@ func generateRandomRecordForTable4(seenNumbers map[int]bool) Record {
 	return MakeRecord([]Field{&IntField{firstInt}, &StringField{string(randomBuffer)}, &IntField{secondInt}})
 }
 
+func generateRandomRecordForTable5(seenNumbers map[int]bool) Record {
+	firstInt := generateUniqueNumber(seenNumbers, 10000)
+	secondInt := generateUniqueNumber(seenNumbers, 10000)
+	randomBuffer := make([]byte, 200)
+	// the documentation pretty much gurantees this function will always succeed, no need to check return value
+	rand.Read(randomBuffer)
+	return MakeRecord([]Field{&IntField{firstInt}, &StringField{string(randomBuffer)}, &IntField{secondInt}})
+}
+
 func TestIndexAddManyRecords(t *testing.T) {
 	recordsToAdd := make([]Record, 0)
 	seenNumbers := make(map[int]bool)
@@ -840,7 +884,7 @@ func TestIndexAddManyRecords(t *testing.T) {
 		recordsToAdd = append(recordsToAdd, record)
 	}
 
-	IndexAddAndRemoveHelper(t, recordsToAdd, make([]Record, 0))
+	IndexAddAndRemoveHelper(t, recordsToAdd, make([]Record, 0), buildTable4, []int{0})
 }
 
 func TestIndexAddAndRemoveManyRecords(t *testing.T) {
@@ -854,5 +898,19 @@ func TestIndexAddAndRemoveManyRecords(t *testing.T) {
 
 	recordsToDelete := recordsToAdd[100:300]
 
-	IndexAddAndRemoveHelper(t, recordsToAdd, recordsToDelete)
+	IndexAddAndRemoveHelper(t, recordsToAdd, recordsToDelete, buildTable4, []int{0})
+}
+
+func TestMultipleIndexes(t *testing.T) {
+	recordsToAdd := make([]Record, 0)
+	seenNumbers := make(map[int]bool)
+
+	for i := 0; i < 1000; i++ {
+		record := generateRandomRecordForTable5(seenNumbers)
+		recordsToAdd = append(recordsToAdd, record)
+	}
+
+	recordsToDelete := recordsToAdd[100:300]
+
+	IndexAddAndRemoveHelper(t, recordsToAdd, recordsToDelete, buildTable5, []int{0, 2})
 }
