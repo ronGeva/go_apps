@@ -152,6 +152,25 @@ func buildTable5() (database, string) {
 	return db, tableID
 }
 
+// initializes a database with 2 tables
+func buildTable6() (database, string, string) {
+	dbPath := "C:\\temp\\my_db"
+
+	db, _ := initializeTestDB(dbPath)
+
+	table1column1 := columndHeader{"table1column1", FieldTypeInt, nil, dbPointer{0, 0}}
+	table1column2 := columndHeader{"table1column2", FieldTypeString, nil, dbPointer{0, 0}}
+	table1scheme := tableScheme{[]columndHeader{table1column1, table1column2}}
+	writeNewTable(db, "table1", table1scheme)
+
+	table2column1 := columndHeader{"table2column1", FieldTypeInt, nil, dbPointer{0, 0}}
+	table2column2 := columndHeader{"table2column2", FieldTypeString, nil, dbPointer{0, 0}}
+	table2column3 := columndHeader{"table2column3", FieldTypeString, nil, dbPointer{0, 0}}
+	table2scheme := tableScheme{[]columndHeader{table2column1, table2column2, table2column3}}
+	writeNewTable(db, "table2", table2scheme)
+	return db, "table1", "table2"
+}
+
 func getConnectionTable2() (*testContext, error) {
 	db, tableID := buildTable2()
 	dbPath := db.id.identifyingString
@@ -304,8 +323,32 @@ func TestParseSelectQuery2(t *testing.T) {
 	defer closeOpenDB(&openDB)
 
 	sql := "select columna, columnb from newTable where columna = 7 and columnb = 13 or columna = 5 and columna = 10 and not columnb = 5"
-	_, err := parseSelectQuery(&openDB, sql)
+	query, err := parseSelectQuery(&openDB, sql)
 	if err != nil {
+		t.Fail()
+	}
+
+	if len(query.columns) != 2 {
+		t.Fail()
+	}
+}
+
+func TestParseSelectQuery3(t *testing.T) {
+	db, _, _ := buildTable6()
+	openDB := getOpenDB(db)
+	defer closeOpenDB(&openDB)
+
+	sql := "select table1.table1column1, table1.table1column2, table2.table2column3 from table1 join table2 where ((table1.table1column1 = 5) and (table1.table1column2 = \"aaa\")) or ((table2.table2column3 = \"bbb\") and (not (table1.table1column1 = 17)))"
+	query, err := parseSelectQuery(&openDB, sql)
+	if err != nil {
+		t.Fail()
+	}
+
+	// make sure the query only has the expected columns
+	if len(query.columns) != 3 {
+		t.Fail()
+	}
+	if query.columns[2] != 4 {
 		t.Fail()
 	}
 }

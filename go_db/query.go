@@ -17,14 +17,21 @@ const (
 	QueryTypeUpdate
 )
 
+type columnNameType int8
+
+const (
+	columnNameTypeUnknown columnNameType = iota
+	columnNamesTypeSingleTable
+	columnNamesTypeMultipleTables
+)
+
 type stringSet map[string]interface{}
 
 type selectQuery struct {
 	// The columns asked to retrieve, in the order they've been requested
 	columns []uint32
-	// The table the query should be performed on
-	// TODO: support JOINs(?)
-	tableID string
+	// The tables the query should be performed on
+	tableIDs []string
 	// The conditions relevant for this query
 	condition *conditionNode
 
@@ -122,7 +129,7 @@ func stringToWords(str string) []string {
 	return strings.FieldsFunc(str, isWhitespace)
 }
 
-func tableIDFromQuery(words []string, wordBefore string) string {
+func tableIDsFromQuery(words []string, wordBefore string) []string {
 	tableIDIndex := len(words) // set the index as something illegal
 	for index := range words {
 		if words[index] == wordBefore {
@@ -131,12 +138,31 @@ func tableIDFromQuery(words []string, wordBefore string) string {
 		}
 	}
 	if tableIDIndex >= len(words) {
-		return ""
+		return nil
 	}
-	return words[tableIDIndex]
+	tableIDs := []string{words[tableIDIndex]}
+	tableIDIndex += 1
+	// keep adding tables which appear in the format:
+	// <tableID> JOIN <tableID2> JOIN <tableID3> ...
+	for tableIDIndex < len(words)-1 && words[tableIDIndex] == "join" {
+		tableIDs = append(tableIDs, words[tableIDIndex+1])
+		tableIDIndex += 2
+	}
+
+	return tableIDs
 }
 
-func columnNamesFromQuery(words []string) ([]string, error) {
+func tableIDFromQuery(words []string, wordBefore string) (string, error) {
+	tableIDs := tableIDsFromQuery(words, wordBefore)
+	if len(tableIDs) != 1 {
+		return "", fmt.Errorf("expected exactly one table name to mentioned, found %d in query",
+			len(tableIDs))
+	}
+
+	return tableIDs[0], nil
+}
+
+func columnNamesFromQuery(words []string) (stringSet, error) {
 	if len(words) == 0 {
 		return nil, fmt.Errorf("cannot extract columns from empty query")
 	}
@@ -150,7 +176,7 @@ func columnNamesFromQuery(words []string) ([]string, error) {
 	}
 
 	// Column names are between the 'select' and the 'from' clauses
-	columnNames := make([]string, 0)
+	columnNames := make(stringSet)
 	for i := 1; i < fromIndex; i++ {
 		// Column names should be separated by a comma (',')
 		if i < fromIndex-1 {
@@ -159,16 +185,24 @@ func columnNamesFromQuery(words []string) ([]string, error) {
 			}
 			words[i] = words[i][:len(words[i])-1]
 		}
-		columnNames = append(columnNames, words[i])
+		columnNames[words[i]] = nil
 	}
 
 	return columnNames, nil
 }
 
-func tableColumnNameToIndex(scheme tableScheme) map[string]uint32 {
+// the tablePrefix is the prefix we expect all columns to be preceded by, as in the syntax:
+// <table name>.<column name>.
+// if we don't expect this syntax, we must pass an empty string in the tablePrefix parameter.
+func tableColumnNameToIndex(scheme tableScheme, tablePrefix string) map[string]uint32 {
 	nameToIndex := map[string]uint32{}
 	for i, column := range scheme.columns {
-		nameToIndex[strings.ToLower(column.columnName)] = uint32(i)
+		columnName := strings.ToLower(column.columnName)
+		if len(tablePrefix) > 0 {
+			columnName = tablePrefix + "." + columnName
+		}
+
+		nameToIndex[columnName] = uint32(i)
 	}
 	return nameToIndex
 }
@@ -177,6 +211,7 @@ func columnNamesToColumnIndexes(scheme tableScheme, nameToIndex map[string]uint3
 	columnNames []string) ([]uint32, error) {
 	columnIndexes := make([]uint32, 0)
 	for _, columnName := range columnNames {
+		columnName = strings.ToLower(columnName)
 		if index, exists := nameToIndex[columnName]; exists {
 			columnIndexes = append(columnIndexes, index)
 		} else {
@@ -186,7 +221,7 @@ func columnNamesToColumnIndexes(scheme tableScheme, nameToIndex map[string]uint3
 	return columnIndexes, nil
 }
 
-func parseSingleConditionInternal(condStrings conditionStrings, scheme tableScheme,
+func parseSingleConditionInternal(condStrings conditionStrings, columnsScheme []columndHeader,
 	nameToIndex map[string]uint32) (*condition, error) {
 	// We currently assume the first operand always refer to a column name while the
 	// second operand always refer to a value
@@ -197,7 +232,7 @@ func parseSingleConditionInternal(condStrings conditionStrings, scheme tableSche
 	if !exists {
 		return nil, fmt.Errorf("condition contains non-existing column %s", condStrings.firstOperand)
 	}
-	firstColumn := scheme.columns[index]
+	firstColumn := columnsScheme[index]
 	parseFunc := FIELD_TYPE_QUERY_VALUE_PARSE[firstColumn.columnType]
 	value, err := parseFunc(condStrings.secondOperand)
 	if err != nil {
@@ -260,7 +295,7 @@ func divideStatementByParentheses(sql string, start int, end int) ([]parentheses
 	return intervals, nil
 }
 
-func parseSingleCondition(sql string, scheme tableScheme, nameToIndex map[string]uint32,
+func parseSingleCondition(sql string, columnsScheme []columndHeader, nameToIndex map[string]uint32,
 	start int, end int) (*conditionNode, error) {
 	for i := start; i < end; i++ {
 		for operator := range CONDITION_OPERATORS {
@@ -269,7 +304,7 @@ func parseSingleCondition(sql string, scheme tableScheme, nameToIndex map[string
 				secondOperand := removeWhitespaces(sql[i+len(operator) : end])
 				condStrings := conditionStrings{firstOperand: firstOperand,
 					secondOperand: secondOperand, operator: operator}
-				cond, err := parseSingleConditionInternal(condStrings, scheme, nameToIndex)
+				cond, err := parseSingleConditionInternal(condStrings, columnsScheme, nameToIndex)
 				if err != nil {
 					return nil, err
 				}
@@ -303,7 +338,7 @@ func divideStatementByOperator(sql string, paranthesesIntervals []parenthesesInt
 	return intervals, nil
 }
 
-func parseConditionByOperator(sql string, nameToIndex map[string]uint32, scheme tableScheme,
+func parseConditionByOperator(sql string, nameToIndex map[string]uint32, columnsScheme []columndHeader,
 	parenthesesIntervals []parenthesesInterval, operatorIndex int, start int, end int) (*conditionNode, error) {
 
 	// divide by or operators
@@ -320,10 +355,10 @@ func parseConditionByOperator(sql string, nameToIndex map[string]uint32, scheme 
 		var node *conditionNode
 		var err error
 		if nextOperatorIndex < len(LOGICAL_OPREATORS) {
-			node, err = parseConditionByOperator(sql, nameToIndex, scheme, parenthesesIntervals, nextOperatorIndex,
-				int(interval.start), int(interval.end))
+			node, err = parseConditionByOperator(sql, nameToIndex, columnsScheme, parenthesesIntervals,
+				nextOperatorIndex, int(interval.start), int(interval.end))
 		} else {
-			node, err = parseCondition(sql, nameToIndex, scheme, int(interval.start), int(interval.end))
+			node, err = parseCondition(sql, nameToIndex, columnsScheme, int(interval.start), int(interval.end))
 		}
 		if err != nil {
 			return nil, err
@@ -356,7 +391,7 @@ func isAtomicCondition(sql string, start int, end int) bool {
 	return true
 }
 
-func parseCondition(sql string, nameToIndex map[string]uint32, scheme tableScheme,
+func parseCondition(sql string, nameToIndex map[string]uint32, columnsScheme []columndHeader,
 	start int, end int) (*conditionNode, error) {
 	// ignore surronding whitespaces
 	for isWhitespace(rune(sql[start])) {
@@ -380,15 +415,15 @@ func parseCondition(sql string, nameToIndex map[string]uint32, scheme tableSchem
 	}
 
 	if len(parenthesesIntervals) == 1 && parenthesesIntervals[0].parentheses {
-		node, err = parseCondition(sql, nameToIndex, scheme,
+		node, err = parseCondition(sql, nameToIndex, columnsScheme,
 			parenthesesIntervals[0].start, parenthesesIntervals[0].end)
 	} else {
 		if len(parenthesesIntervals) == 1 && isAtomicCondition(sql, parenthesesIntervals[0].start,
 			parenthesesIntervals[0].end) {
-			node, err = parseSingleCondition(sql, scheme, nameToIndex,
+			node, err = parseSingleCondition(sql, columnsScheme, nameToIndex,
 				parenthesesIntervals[0].start, parenthesesIntervals[0].end)
 		} else {
-			node, err = parseConditionByOperator(sql, nameToIndex, scheme, parenthesesIntervals, 0,
+			node, err = parseConditionByOperator(sql, nameToIndex, columnsScheme, parenthesesIntervals, 0,
 				start, end)
 		}
 	}
@@ -414,7 +449,7 @@ func endOfWhereStatement(sql string) int {
 }
 
 func parseWhereStatement(sql string, nameToIndex map[string]uint32,
-	scheme tableScheme) (*conditionNode, error) {
+	columnsScheme []columndHeader) (*conditionNode, error) {
 	whereIndex := strings.Index(sql, "where")
 	if whereIndex == -1 {
 		return nil, nil
@@ -424,7 +459,7 @@ func parseWhereStatement(sql string, nameToIndex map[string]uint32,
 
 	// TODO: handle queries with something after the condition
 	whereStatement := sql[whereIndex+len("where") : whereStatementEnd]
-	node, err := parseCondition(whereStatement, nameToIndex, scheme, 0, len(whereStatement))
+	node, err := parseCondition(whereStatement, nameToIndex, columnsScheme, 0, len(whereStatement))
 	if err != nil {
 		return nil, err
 	}
@@ -437,8 +472,9 @@ func parseWhereStatementInQuery(db *openDB, sql string, tableID string) (*condit
 		return nil, err
 	}
 	tableHeaders := parseTableHeaders(db, *tablePointer)
-	nameToIndex := tableColumnNameToIndex(tableHeaders.scheme)
-	return parseWhereStatement(sql, nameToIndex, tableHeaders.scheme)
+
+	nameToIndex := tableColumnNameToIndex(tableHeaders.scheme, "")
+	return parseWhereStatement(sql, nameToIndex, tableHeaders.scheme.columns)
 }
 
 func parseOrderByStatement(sql string, columnNameToIndex map[string]uint32) (*uint32, error) {
@@ -464,24 +500,146 @@ func parseOrderByStatement(sql string, columnNameToIndex map[string]uint32) (*ui
 	}
 }
 
-func parseSelectQuery(db *openDB, sql string) (*selectQuery, error) {
-	words := stringToWords(sql)
-	tableID := tableIDFromQuery(words, "from")
-	tablePointer, err := findTable(db, tableID)
-	if err != nil {
-		return nil, err
+// Retrieves the type of the column names used by the SELECT query.
+// There are two options:
+// 1. Single table syntax - column names are represented by their name, without any prefix.
+// 2. Multi table syntax - column names are prefixed by "<table name>."
+// A mix of those two representation is not supported.
+func selectQueryColumnNamesType(columnNames stringSet) (columnNameType, error) {
+	columnNamesType := columnNameTypeUnknown
+
+	for columnName := range columnNames {
+		delimeterCount := strings.Count(columnName, ".")
+		if delimeterCount > 1 {
+			return columnNameTypeUnknown, fmt.Errorf("invalid column name %s", columnName)
+		}
+
+		if delimeterCount == 1 {
+			if columnNamesType == columnNamesTypeSingleTable {
+				return columnNameTypeUnknown, fmt.Errorf("found both single-table column name format as well as multiple tables format")
+			}
+
+			columnNamesType = columnNamesTypeMultipleTables
+		} else {
+			if columnNamesType == columnNamesTypeMultipleTables {
+				return columnNameTypeUnknown, fmt.Errorf("found both single-table column name format as well as multiple tables format")
+			}
+
+			columnNamesType = columnNamesTypeSingleTable
+		}
 	}
-	tableHeaders := parseTableHeaders(db, *tablePointer)
+
+	return columnNamesType, nil
+}
+
+// retrieves the column names relevant for the current query
+func tableColumnsInQuery(tableColumns []columndHeader, prependTableName bool, tableName string,
+	columnNamesInQuery stringSet) []string {
+	columnsInQuery := make([]string, 0)
+	for i := range tableColumns {
+		columnName := tableColumns[i].columnName
+		if prependTableName {
+			columnName = tableName + "." + columnName
+		}
+		_, ok := columnNamesInQuery[strings.ToLower(columnName)]
+		if !ok {
+			// column was not requested
+			continue
+		}
+
+		columnsInQuery = append(columnsInQuery, columnName)
+	}
+
+	return columnsInQuery
+}
+
+// retrieves the select columns of a specific table, as well as a mpping of <column name>:<column offset>.
+// all the columns offsets retrieved are local in the table, and must be fixed in order to get the joint
+// table offset.
+func selectQueryGetTableColumns(scheme tableScheme, tableID string, columnNamesType columnNameType,
+	columnNames stringSet) ([]uint32, map[string]uint32, error) {
+	tableNamePrefix := ""
+	if columnNamesType == columnNamesTypeMultipleTables {
+		tableNamePrefix = tableID
+	}
+	nameToIndex := tableColumnNameToIndex(scheme, tableNamePrefix)
+
+	tableColumns := tableColumnsInQuery(scheme.columns,
+		columnNamesType == columnNamesTypeMultipleTables, tableID, columnNames)
+
+	selectColumns, err := columnNamesToColumnIndexes(scheme, nameToIndex, tableColumns)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	return selectColumns, nameToIndex, nil
+}
+
+func selectQueryGetTablesColumns(db *openDB, words []string, tableIDs []string) (
+	[]uint32, map[string]uint32, []columndHeader, error) {
+	selectColumns := make([]uint32, 0)
+	nameToIndex := make(map[string]uint32)
+	columnsScheme := make([]columndHeader, 0)
+
 	columnNames, err := columnNamesFromQuery(words)
 	if err != nil {
-		return nil, err
+		return nil, nil, nil, err
 	}
-	nameToIndex := tableColumnNameToIndex(tableHeaders.scheme)
-	columnIndexes, err := columnNamesToColumnIndexes(tableHeaders.scheme, nameToIndex, columnNames)
+
+	columnNamesType, err := selectQueryColumnNamesType(columnNames)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+
+	// this variable used to "advance" the column offsets according to the sum of
+	// the previous joint tables.
+	// this is required sinece we treat the final record as one big record containing
+	// all columns in all the joint tables.
+	columnsOffset := 0
+	for _, tableID := range tableIDs {
+		tablePointer, err := findTable(db, tableID)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		tableHeaders := parseTableHeaders(db, *tablePointer)
+
+		newColumnIndexes, newNameToIndex, err :=
+			selectQueryGetTableColumns(tableHeaders.scheme, tableID, columnNamesType, columnNames)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+
+		// fix offsets in all "column offsets" variables
+		for j := 0; j < len(newColumnIndexes); j++ {
+			newColumnIndexes[j] += uint32(columnsOffset)
+		}
+		selectColumns = append(selectColumns, newColumnIndexes...)
+
+		for columnName := range newNameToIndex {
+			nameToIndex[columnName] = newNameToIndex[columnName] + uint32(columnsOffset)
+		}
+
+		columnsScheme = append(columnsScheme, tableHeaders.scheme.columns...)
+
+		columnsOffset += len(tableHeaders.scheme.columns)
+	}
+
+	return selectColumns, nameToIndex, columnsScheme, nil
+}
+
+func parseSelectQuery(db *openDB, sql string) (*selectQuery, error) {
+	words := stringToWords(sql)
+	tableIDs := tableIDsFromQuery(words, "from")
+	if tableIDs == nil {
+		return nil, fmt.Errorf("invalid 'from' clause in sql statement %s", sql)
+	}
+
+	selectColumns, nameToIndex, columnsScheme, err := selectQueryGetTablesColumns(db, words, tableIDs)
 	if err != nil {
 		return nil, err
 	}
-	cond, err := parseWhereStatement(sql, nameToIndex, tableHeaders.scheme)
+
+	cond, err := parseWhereStatement(sql, nameToIndex, columnsScheme)
 	if err != nil {
 		return nil, err
 	}
@@ -491,7 +649,7 @@ func parseSelectQuery(db *openDB, sql string) (*selectQuery, error) {
 		return nil, err
 	}
 
-	return &selectQuery{columns: columnIndexes, tableID: tableID, condition: cond, orderBy: orderBy}, nil
+	return &selectQuery{columns: selectColumns, tableIDs: tableIDs, condition: cond, orderBy: orderBy}, nil
 }
 
 func parseSingleValuesTuple(statement string, index *int) ([]string, error) {
@@ -572,7 +730,11 @@ func parseInsertQueryValues(sql string, scheme tableScheme) ([]Record, error) {
 
 func parseInsertQuery(db *openDB, sql string) (*insertQuery, error) {
 	words := stringToWords(sql)
-	tableID := tableIDFromQuery(words, "into")
+	tableID, err := tableIDFromQuery(words, "into")
+	if err != nil {
+		return nil, err
+	}
+
 	tablePointer, err := findTable(db, tableID)
 	if err != nil {
 		return nil, err
@@ -589,7 +751,11 @@ func parseInsertQuery(db *openDB, sql string) (*insertQuery, error) {
 // TODO: remove code duplication between this functon and parseInsertQuery
 func parseDeleteQuery(db *openDB, sql string) (*deleteQuery, error) {
 	words := stringToWords(sql)
-	tableID := tableIDFromQuery(words, "from")
+	tableID, err := tableIDFromQuery(words, "from")
+	if err != nil {
+		return nil, err
+	}
+
 	cond, err := parseWhereStatementInQuery(db, sql, tableID)
 	if err != nil {
 		return nil, err
@@ -617,7 +783,10 @@ func singleParanthesesInterval(intervals []parenthesesInterval) *parenthesesInte
 
 func parseCreateQuery(db *openDB, sql string) (*createQuery, error) {
 	words := stringToWords(sql)
-	tableID := tableIDFromQuery(words, "table")
+	tableID, err := tableIDFromQuery(words, "table")
+	if err != nil {
+		return nil, err
+	}
 
 	intervals, err := divideStatementByParentheses(sql, 0, len(sql))
 	if err != nil {
@@ -672,7 +841,7 @@ func parseUpdateSetStatement(db *openDB, sql string, scheme tableScheme) (*recor
 		return nil, err
 	}
 
-	nameToIndex := tableColumnNameToIndex(scheme)
+	nameToIndex := tableColumnNameToIndex(scheme, "")
 	setAssignments := strings.Split(setStatement, ",")
 	changes := make([]recordChange, 0)
 	for _, assignment := range setAssignments {
@@ -698,7 +867,11 @@ func parseUpdateSetStatement(db *openDB, sql string, scheme tableScheme) (*recor
 
 func parseUpdateQuery(db *openDB, sql string) (*updateQuery, error) {
 	words := stringToWords(sql)
-	tableID := tableIDFromQuery(words, "update")
+	tableID, err := tableIDFromQuery(words, "update")
+	if err != nil {
+		return nil, err
+	}
+
 	cond, err := parseWhereStatementInQuery(db, sql, tableID)
 	if err != nil {
 		return nil, err
