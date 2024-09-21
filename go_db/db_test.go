@@ -171,6 +171,21 @@ func buildTable6() (database, string, string) {
 	return db, "table1", "table2"
 }
 
+func buildTable7() (database, string, string) {
+	db, table1, table2 := buildTable6()
+
+	addRecordToTable(db, table1, Record{Fields: []Field{IntField{100}, StringField{"Hello World"}}})
+	addRecordToTable(db, table1, Record{Fields: []Field{IntField{55}, StringField{"A string"}}})
+	addRecordToTable(db, table1, Record{Fields: []Field{IntField{-199}, StringField{"AAAAAAAA"}}})
+
+	addRecordToTable(db, table2, Record{Fields: []Field{IntField{100}, StringField{"Goodbye world"},
+		StringField{"AAAA stringo"}}})
+	addRecordToTable(db, table2, Record{Fields: []Field{IntField{100}, StringField{"BBBBBBBBB"},
+		StringField{"CCCCCCCCCCCCC"}}})
+
+	return db, table1, table2
+}
+
 func getConnectionTable2() (*testContext, error) {
 	db, tableID := buildTable2()
 	dbPath := db.id.identifyingString
@@ -427,6 +442,28 @@ func TestCursorSelect2(t *testing.T) {
 	}
 }
 
+// test select on multiple tables
+func TestCursorSelect3(t *testing.T) {
+	db, _, _ := buildTable7()
+	dbPath := db.id.identifyingString
+	conn, err := Connect(dbPath)
+	if err != nil {
+		t.Fail()
+	}
+	cursor := conn.OpenCursor()
+
+	err = cursor.Execute("Select table1.table1column1, table2.table2column2 from table1 join table2 order by table1.table1column1")
+	if err != nil {
+		t.Fail()
+	}
+	records := cursor.FetchAll()
+	if len(records) != 6 {
+		t.Fail()
+	}
+
+	// TODO: add tests validating the values of the joint table are correct
+}
+
 func TestCursorInsert1(t *testing.T) {
 	db, _ := buildTable2()
 	dbPath := db.id.identifyingString
@@ -675,7 +712,7 @@ func TestMapEachRecord(t *testing.T) {
 	cond := buildConditionTreeForTestAbove500OrBelow100()
 	openDatabase := getOpenDB(db)
 	buildConditionTreeForTest()
-	output, err := mapEachRecord(&openDatabase, tableID, &cond, mapGetRecords, nil)
+	output, err := mapEachRecord(&openDatabase, []string{tableID}, &cond, mapGetRecords, nil)
 	if err != nil {
 		t.Fail()
 	}

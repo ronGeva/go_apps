@@ -58,6 +58,46 @@ type recordContext struct {
 	index  uint32
 }
 
+type innerTableRecordIterator struct {
+	db             *openDB
+	headers        *tableHeaders
+	bitmapData     []byte
+	recordsPointer dbPointer
+	sizeOfRecord   uint32
+	offset         uint32
+}
+
+type tableCurrentRecord struct {
+	record Record
+	offset uint32
+}
+
+func (iterator *innerTableRecordIterator) done() bool {
+	return iterator.offset >= iterator.recordsPointer.size/iterator.sizeOfRecord
+}
+
+func (iterator *innerTableRecordIterator) next() *tableCurrentRecord {
+	for !iterator.done() && !checkBitFromData(iterator.bitmapData, int(iterator.offset)) {
+		iterator.offset++
+	}
+
+	if iterator.done() {
+		return nil
+	}
+
+	recordData := readFromDbPointer(iterator.db, iterator.recordsPointer, iterator.sizeOfRecord,
+		iterator.sizeOfRecord*iterator.offset)
+	record := deserializeRecord(iterator.db, recordData, iterator.headers.scheme)
+	recordOffset := iterator.offset
+	iterator.offset++
+
+	return &tableCurrentRecord{record: record, offset: recordOffset}
+}
+
+func (iterator *innerTableRecordIterator) reset() {
+	iterator.offset = 0
+}
+
 func addNewTableToTablesArray(db *openDB, newTablePointer dbPointer) mutableDbPointer {
 	// Get the table array db pointer
 	tableArrayPointer := getMutableDbPointer(db, TABLES_POINTER_OFFSET)
@@ -342,53 +382,60 @@ func deleteRecord(db database, tableID string, recordIndex uint32) error {
 	return deleteRecordInternal(&openDatabse, *headers, &recordForChange{index: recordIndex, keys: keyFields})
 }
 
-func validateConditions(scheme tableScheme, recordsCondition conditionNode) bool {
+func validateConditions(columns []columndHeader, recordsCondition conditionNode) bool {
 	if recordsCondition.condition != nil {
 		cond := recordsCondition.condition
-		if int(cond.fieldIndex) >= len(scheme.columns) {
+		if int(cond.fieldIndex) >= len(columns) {
 			return false
 		}
-		if !isConditionSupported(scheme, cond) {
+		if !isConditionSupported(columns, cond) {
 			return false
 		}
 		return true
 	} else {
 		result := true
 		for _, operand := range recordsCondition.operands {
-			result = result && validateConditions(scheme, *operand)
+			result = result && validateConditions(columns, *operand)
 		}
 		return result
 	}
 }
 
-func writeAllRecordsToChannel(openDatabase *openDB, tableID string, recordsCondition *conditionNode,
-	recordsChannel chan<- recordContext) error {
-	tablePointer, err := findTable(openDatabase, tableID)
-	if err != nil {
-		return err
-	}
-	headers := parseTableHeaders(openDatabase, *tablePointer)
-	if recordsCondition != nil && !validateConditions(headers.scheme, *recordsCondition) {
-		return fmt.Errorf("invalid condition in query")
+func validateConditionsJointTable(db *openDB, tableIDs []string, conditions *conditionNode) (bool, error) {
+	if conditions == nil {
+		return true, nil
 	}
 
-	bitmapData := readAllDataFromDbPointer(openDatabase, headers.bitmap.pointer)
-	scheme := headers.scheme
-	recordsPointer := headers.records
-	sizeOfRecord := int(DB_POINTER_SIZE) * len(headers.scheme.columns)
-	for i := 0; i < int(recordsPointer.pointer.size)/sizeOfRecord; i++ {
-		if checkBitFromData(bitmapData, i) {
-			recordData := readFromDbPointer(openDatabase, recordsPointer.pointer, uint32(sizeOfRecord),
-				uint32(sizeOfRecord*i))
-			record := deserializeRecord(openDatabase, recordData, scheme)
-			recordsChannel <- recordContext{record: record, index: uint32(i)}
+	columnHeaders := make([]columndHeader, 0)
+	for _, tableID := range tableIDs {
+		h, err := getTableHeaders(db, tableID)
+		if err != nil {
+			return false, fmt.Errorf("failed to open table %s", tableID)
 		}
+
+		columnHeaders = append(columnHeaders, h.scheme.columns...)
 	}
-	return nil
+
+	return validateConditions(columnHeaders, *conditions), nil
 }
 
-func filterRecordsFromTableInternal(openDatabase *openDB, tableID string, recordsCondition *conditionNode, columns []uint32) ([]Record, error) {
-	records, err := mapEachRecord(openDatabase, tableID, recordsCondition, mapGetRecords, columns)
+func initializeInternalRecordIterator(openDatabase *openDB, tableID string) (*innerTableRecordIterator, error) {
+	tablePointer, err := findTable(openDatabase, tableID)
+	if err != nil {
+		return nil, err
+	}
+	headers := parseTableHeaders(openDatabase, *tablePointer)
+
+	bitmapData := readAllDataFromDbPointer(openDatabase, headers.bitmap.pointer)
+	recordsPointer := headers.records
+	sizeOfRecord := int(DB_POINTER_SIZE) * len(headers.scheme.columns)
+
+	return &innerTableRecordIterator{db: openDatabase, headers: &headers, bitmapData: bitmapData,
+		recordsPointer: recordsPointer.pointer, sizeOfRecord: uint32(sizeOfRecord), offset: 0}, nil
+}
+
+func filterRecordsFromTableInternal(openDatabase *openDB, tableIDs []string, recordsCondition *conditionNode, columns []uint32) ([]Record, error) {
+	records, err := mapEachRecord(openDatabase, tableIDs, recordsCondition, mapGetRecords, columns)
 	if err != nil {
 		return nil, err
 	}
@@ -404,7 +451,7 @@ func deleteRecordsFromTableInternal(db *openDB, tableID string, recordsCondition
 
 	indexedColumns := headers.scheme.indexedColumns()
 
-	recordsToDelete, err := mapEachRecord(db, tableID, recordsCondition, mapGetRecordForChange, indexedColumns)
+	recordsToDelete, err := mapEachRecord(db, []string{tableID}, recordsCondition, mapGetRecordForChange, indexedColumns)
 	if err != nil {
 		return err
 	}
@@ -426,7 +473,7 @@ func filterRecordsFromTable(db database, tableID string, recordsCondition *condi
 	openDatabase := getOpenDB(db)
 	defer closeOpenDB(&openDatabase)
 
-	return filterRecordsFromTableInternal(&openDatabase, tableID, recordsCondition, nil)
+	return filterRecordsFromTableInternal(&openDatabase, []string{tableID}, recordsCondition, nil)
 }
 
 func updateField(db *openDB, headers tableHeaders, offset uint32, change recordChange) error {
@@ -506,7 +553,7 @@ func updateRecordsViaCondition(db *openDB, tableID string, condition *conditionN
 	}
 	keysChanged := columnsIntersection(indexedColumns, columnsChanged)
 
-	records, err := mapEachRecord(db, tableID, condition, mapGetRecordForChange, keysChanged)
+	records, err := mapEachRecord(db, []string{tableID}, condition, mapGetRecordForChange, keysChanged)
 	if err != nil {
 		return err
 	}
