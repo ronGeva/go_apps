@@ -95,7 +95,7 @@ func buildTable3() (database, string) {
 
 // initializes a database with an index
 func buildTable4() (database, string) {
-	dbPath := "C:\\temp\\my_db"
+	dbPath := IN_MEMORY_BUFFER_PATH_MAGIC
 
 	db, tableID := initializeTestDB(dbPath)
 
@@ -113,7 +113,7 @@ func buildTable4() (database, string) {
 
 // initializes a database with multiple indexes
 func buildTable5() (database, string) {
-	dbPath := "C:\\temp\\my_db"
+	dbPath := IN_MEMORY_BUFFER_PATH_MAGIC
 
 	db, tableID := initializeTestDB(dbPath)
 
