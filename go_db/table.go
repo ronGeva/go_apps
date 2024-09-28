@@ -473,7 +473,14 @@ func filterRecordsFromTable(db database, tableID string, recordsCondition *condi
 	openDatabase := getOpenDB(db)
 	defer closeOpenDB(&openDatabase)
 
-	return filterRecordsFromTableInternal(&openDatabase, []string{tableID}, recordsCondition, nil)
+	records, err := filterRecordsFromTableInternal(&openDatabase, []string{tableID}, recordsCondition, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	// set semantics - remove duplications from result
+	uniqueRecords := removeRecordDuplications(records)
+	return uniqueRecords, nil
 }
 
 func updateField(db *openDB, headers tableHeaders, offset uint32, change recordChange) error {

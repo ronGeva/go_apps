@@ -4,6 +4,7 @@ This module contains logic related to a single field of a record.
 package go_db
 
 import (
+	"bytes"
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
@@ -195,4 +196,14 @@ func stringQueryValueParse(data string) ([]byte, error) {
 	}
 
 	return []byte(*str), nil
+}
+
+func fieldsAreEqual(field1 Field, field2 Field) bool {
+	if field1.getType() != field2.getType() {
+		return false
+	}
+
+	data1 := field1.serialize()
+	data2 := field2.serialize()
+	return bytes.Compare(data1, data2) == 0
 }

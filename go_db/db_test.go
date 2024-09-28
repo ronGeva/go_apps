@@ -17,28 +17,6 @@ type testContext struct {
 	tableID string
 }
 
-func areFieldsEqual(field1 Field, field2 Field) bool {
-	if field1.getType() != field2.getType() {
-		return false
-	}
-
-	data1 := field1.serialize()
-	data2 := field2.serialize()
-	return bytes.Compare(data1, data2) == 0
-}
-
-func areRecordsEqual(record1 Record, record2 Record) bool {
-	if len(record1.Fields) != len(record2.Fields) {
-		return false
-	}
-	for i := 0; i < len(record1.Fields); i++ {
-		if !areFieldsEqual(record1.Fields[i], record2.Fields[i]) {
-			return false
-		}
-	}
-	return true
-}
-
 func initializeTestDB(path string) (database, string) {
 	tableID := "newTable"
 	os.Remove(path) // don't care about errors
@@ -436,8 +414,8 @@ func TestCursorSelect2(t *testing.T) {
 	}
 
 	// We expect the order of the records to be reversed
-	if !areRecordsEqual(regulardOrderRecords[0], records[1]) ||
-		!areRecordsEqual(regulardOrderRecords[1], records[0]) {
+	if !recordsAreEqual(regulardOrderRecords[0], records[1]) ||
+		!recordsAreEqual(regulardOrderRecords[1], records[0]) {
 		t.Fail()
 	}
 }
@@ -612,7 +590,7 @@ func CursorUpdateHelper(t *testing.T, db database, tableID string, query string,
 	}
 
 	for i := 0; i < len(expectedRecords); i++ {
-		if !areRecordsEqual(recordsAfter[i], expectedRecords[i]) {
+		if !recordsAreEqual(recordsAfter[i], expectedRecords[i]) {
 			t.Fail()
 		}
 	}
@@ -745,7 +723,7 @@ func TestAddAlotOfRecords1(t *testing.T) {
 	}
 
 	for i := range records {
-		if !areRecordsEqual(
+		if !recordsAreEqual(
 			records[i], Record{[]Field{&IntField{i}, &BlobField{[]byte{1, 2, 3, 4, 5}}}}) {
 			t.Fail()
 		}
@@ -774,7 +752,7 @@ func TestStringField(t *testing.T) {
 	}
 
 	for i := 0; i < len(recordsToAdd); i++ {
-		if !areRecordsEqual(records[i], recordsToAdd[i]) {
+		if !recordsAreEqual(records[i], recordsToAdd[i]) {
 			t.Fail()
 		}
 	}
@@ -889,7 +867,7 @@ func IndexAddAndRemoveHelper(t *testing.T, recordsToAdd []Record, recordsToDelet
 	for i := 0; i < len(recordsToDelete); i++ {
 		found := false
 		for j := 0; j < records.Len(); j++ {
-			if areRecordsEqual(recordsToDelete[i], records.records[j].record) {
+			if recordsAreEqual(recordsToDelete[i], records.records[j].record) {
 				record := records.records[j]
 				// remove record
 				records.records = append(records.records[:j], records.records[j+1:]...)
@@ -993,4 +971,29 @@ func TestMultipleIndexes(t *testing.T) {
 	recordsToDelete := recordsToAdd[100:300]
 
 	IndexAddAndRemoveHelper(t, recordsToAdd, recordsToDelete, buildTable5, []int{0, 2})
+}
+
+func TestRemoveRecordDuplication(t *testing.T) {
+	fields1 := []Field{&IntField{5}, &StringField{"AAAA"}, &IntField{12}}
+	fields2 := []Field{&IntField{1000}, &StringField{"bbbbbb"}, &IntField{-50}}
+	fields3 := []Field{&IntField{5}, &StringField{"CCCC"}, &IntField{-1000}}
+	fields4 := fields2
+
+	record1 := Record{Fields: fields1}
+	record2 := Record{Fields: fields2}
+	record3 := Record{Fields: fields3}
+	record4 := Record{Fields: fields4}
+
+	records := []Record{record1, record2, record3, record4}
+	uniqueRecords := removeRecordDuplications(records)
+
+	if len(uniqueRecords) != 3 {
+		t.FailNow()
+	}
+
+	for i := 0; i < len(uniqueRecords); i++ {
+		if !recordsAreEqual(uniqueRecords[i], records[i]) {
+			t.Fail()
+		}
+	}
 }

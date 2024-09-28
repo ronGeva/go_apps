@@ -4,7 +4,9 @@ A record represents a single "row" of a relational DB table.
 */
 package go_db
 
-import "strconv"
+import (
+	"strconv"
+)
 
 type Record struct {
 	Fields []Field
@@ -64,4 +66,36 @@ func deserializeRecord(db *openDB, recordData []byte, tableScheme tableScheme) R
 		fields = append(fields, deserializationFunc(currData))
 	}
 	return Record{Fields: fields}
+}
+
+func recordsAreEqual(record1 Record, record2 Record) bool {
+	if len(record1.Fields) != len(record2.Fields) {
+		return false
+	}
+	for i := 0; i < len(record1.Fields); i++ {
+		if !fieldsAreEqual(record1.Fields[i], record2.Fields[i]) {
+			return false
+		}
+	}
+	return true
+}
+
+func addRecordNoDuplications(uniqueRecords []Record, record Record) []Record {
+	for _, existingRecord := range uniqueRecords {
+		if recordsAreEqual(existingRecord, record) {
+			return uniqueRecords
+		}
+	}
+
+	return append(uniqueRecords, record)
+}
+
+// given a list of records, remove all duplications within it
+func removeRecordDuplications(records []Record) []Record {
+	uniqueRecords := make([]Record, 0)
+	for _, record := range records {
+		uniqueRecords = addRecordNoDuplications(uniqueRecords, record)
+	}
+
+	return uniqueRecords
 }
