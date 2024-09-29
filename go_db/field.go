@@ -20,12 +20,14 @@ const (
 	FieldTypeInt FieldType = iota
 	FieldTypeString
 	FieldTypeBlob
+	FieldTypeProvenance
 )
 
-var FIELD_TYPE_SERIALIZATION = map[FieldType]func([]byte) Field{
-	FieldTypeInt:    deserializeIntField,
-	FieldTypeBlob:   deserializeBlobField,
-	FieldTypeString: deserializeStringField,
+var FIELD_TYPE_DESERIALIZATION = map[FieldType]func([]byte) Field{
+	FieldTypeInt:        deserializeIntField,
+	FieldTypeBlob:       deserializeBlobField,
+	FieldTypeString:     deserializeStringField,
+	FieldTypeProvenance: deserializeProvenanceField,
 }
 
 var FIELD_TYPE_QUERY_VALUE_PARSE = map[FieldType]func(string) ([]byte, error){

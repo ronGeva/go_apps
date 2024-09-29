@@ -23,13 +23,17 @@ type testTable struct {
 	scheme  tableScheme
 }
 
-func initializeTestDB(path string) (database, string) {
+func initializeTestDbInternal(path string, provenance bool) (database, string) {
 	tableID := "newTable"
 	os.Remove(path) // don't care about errors
 
-	InitializeDB(path)
+	InitializeDB(path, provenance)
 	db := database{id: databaseUniqueID{ioType: LocalFile, identifyingString: path}}
 	return db, tableID
+}
+
+func initializeTestDB(path string) (database, string) {
+	return initializeTestDbInternal(path, false)
 }
 
 func initializeTestDB1() (database, string) {
@@ -37,13 +41,48 @@ func initializeTestDB1() (database, string) {
 	return initializeTestDB(path)
 }
 
-func buildEmptyTableWithDbPath1(dbPath string) (database, string) {
-	db, table := initializeTestDB(dbPath)
+func testTable1Scheme() tableScheme {
 	firstColumn := columnHeader{"columnA", FieldTypeInt, nil, dbPointer{0, 0}}
 	secondColumn := columnHeader{"columnB", FieldTypeBlob, nil, dbPointer{0, 0}}
-	scheme := tableScheme{[]columnHeader{firstColumn, secondColumn}}
+	return makeTableScheme([]columnHeader{firstColumn, secondColumn})
+}
+
+func writeTestTable1(db database, table string) {
+	scheme := testTable1Scheme()
 	err := writeNewTable(db, table, scheme)
 	assert(err == nil, "failed to initialize new test DB")
+}
+
+func addRecordTestTable1(db *openDB, tableName string, first int, second []byte) bool {
+	newRecord := MakeRecord([]Field{&IntField{first}, &BlobField{second}})
+	_, err := addRecordOpenDb(db, tableName, newRecord)
+	return err == nil
+}
+
+func writeTestTable2(db database, table string, index bool, prov *OpenDBProvenance) {
+	firstColumn := columnHeader{"IDColumn", FieldTypeInt, nil, dbPointer{0, 0}}
+	secondColumn := columnHeader{"NameColumn", FieldTypeString, nil, dbPointer{0, 0}}
+	thirdColumn := columnHeader{"intColumn2", FieldTypeInt, nil, dbPointer{0, 0}}
+	scheme := makeTableScheme([]columnHeader{firstColumn, secondColumn, thirdColumn})
+
+	if index {
+		openDatabse := getOpenDbWithProvenance(db, prov)
+		initializeIndexInColumn(&openDatabse, scheme.columns, 0)
+		closeOpenDB(&openDatabse)
+	}
+
+	writeNewTable(db, table, scheme)
+}
+
+func addRecordTestTable2(db *openDB, tableName string, first int, second string, third int) bool {
+	newRecord := MakeRecord([]Field{&IntField{first}, &StringField{second}, &IntField{third}})
+	_, err := addRecordOpenDb(db, tableName, newRecord)
+	return err == nil
+}
+
+func buildEmptyTableWithDbPath1(dbPath string) (database, string) {
+	db, table := initializeTestDB(dbPath)
+	writeTestTable1(db, table)
 
 	return db, table
 }
@@ -68,7 +107,7 @@ func buildTableWithDbPath2(dbPath string) (database, string) {
 
 	firstColumn := columnHeader{"columnA", FieldTypeInt, nil, dbPointer{0, 0}}
 	secondColumn := columnHeader{"columnB", FieldTypeInt, nil, dbPointer{0, 0}}
-	scheme := tableScheme{[]columnHeader{firstColumn, secondColumn}}
+	scheme := makeTableScheme([]columnHeader{firstColumn, secondColumn})
 	writeNewTable(db, tableID, scheme)
 	fields := []Field{&IntField{5}, &IntField{44}}
 	newRecord := MakeRecord(fields)
@@ -89,7 +128,7 @@ func buildTableWithDbPath3(dbPath string) (database, string) {
 
 	firstColumn := columnHeader{"IDColumn", FieldTypeInt, nil, dbPointer{0, 0}}
 	secondColumn := columnHeader{"NameColumn", FieldTypeString, nil, dbPointer{0, 0}}
-	scheme := tableScheme{[]columnHeader{firstColumn, secondColumn}}
+	scheme := makeTableScheme([]columnHeader{firstColumn, secondColumn})
 	writeNewTable(db, tableID, scheme)
 	fields := []Field{&IntField{11}, &StringField{"myname"}}
 	newRecord := MakeRecord(fields)
@@ -108,18 +147,9 @@ func buildTable3() (database, string) {
 // initializes a database with an index
 func buildTable4() (database, string) {
 	dbPath := IN_MEMORY_BUFFER_PATH_MAGIC
-
 	db, tableID := initializeTestDB(dbPath)
 
-	firstColumn := columnHeader{"IDColumn", FieldTypeInt, nil, dbPointer{0, 0}}
-	secondColumn := columnHeader{"NameColumn", FieldTypeString, nil, dbPointer{0, 0}}
-	thirdColumn := columnHeader{"intColumn2", FieldTypeInt, nil, dbPointer{0, 0}}
-	scheme := tableScheme{[]columnHeader{firstColumn, secondColumn, thirdColumn}}
-	openDatabse := getOpenDB(db)
-	initializeIndexInColumn(&openDatabse, &scheme, 0)
-	closeOpenDB(&openDatabse)
-
-	writeNewTable(db, tableID, scheme)
+	writeTestTable2(db, tableID, true, nil)
 	return db, tableID
 }
 
@@ -132,10 +162,10 @@ func buildTable5() (database, string) {
 	firstColumn := columnHeader{"IDColumn", FieldTypeInt, nil, dbPointer{0, 0}}
 	secondColumn := columnHeader{"NameColumn", FieldTypeString, nil, dbPointer{0, 0}}
 	thirdColumn := columnHeader{"intColumn2", FieldTypeInt, nil, dbPointer{0, 0}}
-	scheme := tableScheme{[]columnHeader{firstColumn, secondColumn, thirdColumn}}
+	scheme := makeTableScheme([]columnHeader{firstColumn, secondColumn, thirdColumn})
 	openDatabse := getOpenDB(db)
-	initializeIndexInColumn(&openDatabse, &scheme, 0)
-	initializeIndexInColumn(&openDatabse, &scheme, 2)
+	initializeIndexInColumn(&openDatabse, scheme.columns, 0)
+	initializeIndexInColumn(&openDatabse, scheme.columns, 2)
 	closeOpenDB(&openDatabse)
 
 	writeNewTable(db, tableID, scheme)
@@ -150,13 +180,13 @@ func buildTable6() (database, testTable, testTable) {
 
 	table1column1 := columnHeader{"table1column1", FieldTypeInt, nil, dbPointer{0, 0}}
 	table1column2 := columnHeader{"table1column2", FieldTypeString, nil, dbPointer{0, 0}}
-	table1scheme := tableScheme{[]columnHeader{table1column1, table1column2}}
+	table1scheme := makeTableScheme([]columnHeader{table1column1, table1column2})
 	writeNewTable(db, "table1", table1scheme)
 
 	table2column1 := columnHeader{"table2column1", FieldTypeInt, nil, dbPointer{0, 0}}
 	table2column2 := columnHeader{"table2column2", FieldTypeString, nil, dbPointer{0, 0}}
 	table2column3 := columnHeader{"table2column3", FieldTypeString, nil, dbPointer{0, 0}}
-	table2scheme := tableScheme{[]columnHeader{table2column1, table2column2, table2column3}}
+	table2scheme := makeTableScheme([]columnHeader{table2column1, table2column2, table2column3})
 	writeNewTable(db, "table2", table2scheme)
 	return db, testTable{name: "table1", scheme: table1scheme}, testTable{name: "table2", scheme: table2scheme}
 }
@@ -194,6 +224,11 @@ func getConnectionTable2() (*testContext, error) {
 	return &testContext{db: db, cursor: cursor, tableID: tableID}, nil
 }
 
+func dummyProvenance() OpenDBProvenance {
+	return OpenDBProvenance{auth: ProvenanceAuthentication{user: "ron", password: "1234"},
+		conn: ProvenanceConnection{ipv4: 1001}}
+}
+
 func TestFullFlow(t *testing.T) {
 	db, tableID := buildTable1()
 	records := readAllRecords(db, tableID)
@@ -211,7 +246,7 @@ func TestFullFlow(t *testing.T) {
 }
 
 func TestConditions(t *testing.T) {
-	record := Record{[]Field{IntField{5}, IntField{7}, BlobField{[]byte{11, 13, 25}}}}
+	record := Record{[]Field{IntField{5}, IntField{7}, BlobField{[]byte{11, 13, 25}}}, nil}
 	node1 := conditionNode{}
 	node1.condition = &condition{0, ConditionTypeEqual, uint32ToBytes(5)}
 	// Condition should succeed
@@ -623,7 +658,7 @@ func TestCursorUpdate1(t *testing.T) {
 	records := readAllRecords(db, tableID)
 
 	// we will change this record and this record only
-	records[0] = Record{[]Field{IntField{33}, IntField{89}}}
+	records[0] = Record{[]Field{IntField{33}, IntField{89}}, nil}
 	CursorUpdateHelper(t, db, tableID, "update newTable set columnA=33,columnB=89 where columnA=5", records)
 }
 
@@ -632,7 +667,7 @@ func TestCursorUpdate2(t *testing.T) {
 	records := readAllRecords(db, tableID)
 
 	// we will change this record and this record only
-	records[1] = Record{[]Field{IntField{15}, StringField{"wowname"}}}
+	records[1] = Record{[]Field{IntField{15}, StringField{"wowname"}}, nil}
 
 	CursorUpdateHelper(t, db, tableID,
 		"update newTable set IDColumn=15, NameColumn=\"wowname\" where NameColumn=\"othername\"",
@@ -746,7 +781,7 @@ func TestAddAlotOfRecords1(t *testing.T) {
 
 	for i := range records {
 		if !recordsAreEqual(
-			records[i], Record{[]Field{&IntField{i}, &BlobField{[]byte{1, 2, 3, 4, 5}}}}) {
+			records[i], Record{[]Field{&IntField{i}, &BlobField{[]byte{1, 2, 3, 4, 5}}}, nil}) {
 			t.Fail()
 		}
 	}
@@ -756,12 +791,12 @@ func TestStringField(t *testing.T) {
 	db, tableID := initializeTestDB1()
 	firstColumn := columnHeader{"stringColumn1", FieldTypeString, nil, dbPointer{0, 0}}
 	secondColumn := columnHeader{"stringColumn2", FieldTypeString, nil, dbPointer{0, 0}}
-	scheme := tableScheme{[]columnHeader{firstColumn, secondColumn}}
+	scheme := makeTableScheme([]columnHeader{firstColumn, secondColumn})
 	writeNewTable(db, tableID, scheme)
 
-	record1 := Record{[]Field{StringField{"Hello world"}, StringField{"goodbye world"}}}
-	record2 := Record{[]Field{StringField{"A string"}, StringField{"another string"}}}
-	record3 := Record{[]Field{StringField{"Final record"}, StringField{"This is a record"}}}
+	record1 := Record{[]Field{StringField{"Hello world"}, StringField{"goodbye world"}}, nil}
+	record2 := Record{[]Field{StringField{"A string"}, StringField{"another string"}}, nil}
+	record3 := Record{[]Field{StringField{"Final record"}, StringField{"This is a record"}}, nil}
 	recordsToAdd := []Record{record1, record2, record3}
 	for i := 0; i < len(recordsToAdd); i++ {
 		addRecordToTable(db, tableID, recordsToAdd[i])
@@ -1015,6 +1050,88 @@ func TestRemoveRecordDuplication(t *testing.T) {
 
 	for i := 0; i < len(uniqueRecords); i++ {
 		if !recordsAreEqual(uniqueRecords[i], records[i]) {
+			t.Fail()
+		}
+	}
+}
+
+// test the provenance of a single inserted record behaves as expected in the most basic terms,
+// given some assumptions about the way the provenance score is calculated
+func TestProvenanceSanity(t *testing.T) {
+	db, tableName := initializeTestDbInternal(IN_MEMORY_BUFFER_PATH_MAGIC, true)
+	writeTestTable1(db, tableName)
+
+	record := Record{[]Field{&IntField{55}, &BlobField{[]byte{1, 2, 3, 4, 5}}}, nil}
+
+	prov := dummyProvenance()
+	openDb := getOpenDbWithProvenance(db, &prov)
+
+	_, err := addRecordOpenDb(&openDb, tableName, record)
+	if err != nil {
+		t.Fail()
+	}
+
+	closeOpenDB(&openDb)
+
+	records := readAllRecords(db, tableName)
+	if len(records) != 1 {
+		t.Fail()
+	}
+
+	firstKey := records[0].Provenance[0].ToKey()
+	if firstKey == nil || *firstKey != 1001 {
+		t.Fail()
+	}
+
+	secondKey := records[0].Provenance[1].ToKey()
+	if secondKey == nil || int(*secondKey) != len("1234") {
+		t.Fail()
+	}
+}
+
+func TestProvenanceJoin(t *testing.T) {
+	prov := dummyProvenance()
+	db, firstTable := initializeTestDbInternal(IN_MEMORY_BUFFER_PATH_MAGIC, true)
+	writeTestTable1(db, firstTable) // "newTable"
+	secondTable := "otherTable"
+	writeTestTable2(db, secondTable, false, &prov)
+
+	openDb := getOpenDbWithProvenance(db, &prov)
+	defer closeOpenDB(&openDb)
+
+	if !addRecordTestTable1(&openDb, firstTable, 1, []byte{1}) {
+		t.FailNow()
+	}
+	if !addRecordTestTable1(&openDb, firstTable, 9, []byte{100, 100, 100, 100, 55, 55, 55}) {
+		t.FailNow()
+	}
+
+	if !addRecordTestTable2(&openDb, secondTable, 10111, "Aho Corasick", 1337) {
+		t.FailNow()
+	}
+	if !addRecordTestTable2(&openDb, secondTable, -52, "mmmmmmm", 0) {
+		t.FailNow()
+	}
+
+	iterator, err := initializeJointTableRecordIterator(&openDb, []string{"newTable", "otherTable"})
+	if err != nil {
+		t.FailNow()
+	}
+
+	records := make([]Record, 0)
+	record := iterator.next()
+	for record != nil {
+		records = append(records, record.record)
+		record = iterator.next()
+	}
+
+	if len(records) != 4 {
+		t.Fail()
+	}
+
+	for _, record := range records {
+		// each table has x provenance columns, their JOIN should result in 2x prov columns
+		if len(record.Provenance) != len(openDb.provFields)*2 {
 			t.Fail()
 		}
 	}

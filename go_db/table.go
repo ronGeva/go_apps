@@ -11,7 +11,13 @@ import (
 type recordsCallbackFunc[contextType any] func(record Record, index int, context contextType)
 
 type tableScheme struct {
-	columns []columnHeader
+	columns     []columnHeader
+	provColumns []columnHeader
+}
+
+// returns the amount of expected field in each record of the table
+func (scheme *tableScheme) fieldsInRecord() int {
+	return len(scheme.columns) + len(scheme.provColumns)
 }
 
 func (scheme *tableScheme) indexedColumns() []uint32 {
@@ -37,11 +43,12 @@ type tableHeaders struct {
 	records mutableDbPointer
 }
 
+// returns the offset in the records table of a specific record's field
 func (headers *tableHeaders) fieldOffset(recordIndex int, fieldIndex int) int {
-	if fieldIndex >= len(headers.scheme.columns) {
+	if fieldIndex >= headers.scheme.fieldsInRecord() {
 		return -1
 	}
-	return int(DB_POINTER_SIZE) * (len(headers.scheme.columns)*recordIndex + fieldIndex)
+	return int(DB_POINTER_SIZE) * (headers.scheme.fieldsInRecord()*recordIndex + fieldIndex)
 }
 
 type recordChange struct {
@@ -111,6 +118,11 @@ func writeTableScheme(db *openDB, scheme tableScheme, mutablePointer mutableDbPo
 	for _, columnHeader := range scheme.columns {
 		schemeData = append(schemeData, serializeColumnHeader(columnHeader)...)
 	}
+
+	for _, columnHeader := range scheme.provColumns {
+		schemeData = append(schemeData, serializeColumnHeader(columnHeader)...)
+	}
+
 	// Put the size of the scheme data at the start of it
 	binary.LittleEndian.PutUint32(schemeData[:4], uint32(len(schemeData)-4))
 	appendDataToDataBlock(db, schemeData, uint32(mutablePointer.location))
@@ -122,7 +134,11 @@ func parseTableScheme(db *openDB, schemeData []byte) tableScheme {
 	var header columnHeader
 	for i := 0; i < len(schemeData); {
 		header, i = deserializeColumnHeader(db, schemeData, i)
-		scheme.columns = append(scheme.columns, header)
+		if header.columnType == FieldTypeProvenance {
+			scheme.provColumns = append(scheme.provColumns, header)
+		} else {
+			scheme.columns = append(scheme.columns, header)
+		}
 	}
 
 	return scheme
@@ -154,6 +170,9 @@ func initializeNewTableContent(db *openDB, tableID string, scheme tableScheme, t
 }
 
 func writeNewTableInternal(openDatabase *openDB, tableID string, scheme tableScheme) {
+	// add DB provenance to table's scheme
+	scheme.provColumns = openDatabase.provenanceSchemeColumns()
+
 	newTablePointer := allocateNewDataBlock(openDatabase)
 	mutablePointer := addNewTableToTablesArray(openDatabase, newTablePointer)
 	initializeNewTableContent(openDatabase, tableID, scheme, &mutablePointer)
@@ -228,10 +247,11 @@ func writeRecordToTable(db *openDB, headers tableHeaders, recordIndex uint32, re
 	data := serializeRecord(db, record)
 
 	recordsPointer := headers.records
-	prevAmountOfRecords := recordsPointer.pointer.size / (DB_POINTER_SIZE * uint32(len(headers.scheme.columns)))
+	prevAmountOfRecords := recordsPointer.pointer.size /
+		(DB_POINTER_SIZE * uint32(headers.scheme.fieldsInRecord()))
 	if prevAmountOfRecords > recordIndex {
 		// Override pre-existing invalid record
-		offset := DB_POINTER_SIZE * uint32(len(headers.scheme.columns)) * recordIndex
+		offset := headers.fieldOffset(int(recordIndex), 0)
 		writeToDataBlock(db, recordsPointer.pointer, data, uint32(offset))
 	} else {
 		// Write a new record
@@ -259,6 +279,7 @@ func parseTableHeaders(db *openDB, tablePointer dbPointer) tableHeaders {
 
 func addRecordToTableInternal(db *openDB, tablePointer dbPointer, record Record) (uint32, error) {
 	headers := parseTableHeaders(db, tablePointer)
+	addProvenanceToRecord(db, &record)
 	bitmapData := readAllDataFromDbPointer(db, headers.bitmap.pointer)
 	firstAvailableRecordNum := findFirstAvailableBlock(bitmapData)
 
@@ -287,7 +308,7 @@ func addRecordToTable(db database, tableID string, record Record) (uint32, error
 
 func getRecordFromOffset(db *openDB, headers *tableHeaders, offset uint32) Record {
 	tableScheme := headers.scheme
-	sizeOfRecord := int(DB_POINTER_SIZE) * len(tableScheme.columns)
+	sizeOfRecord := int(DB_POINTER_SIZE) * tableScheme.fieldsInRecord()
 
 	recordData := readFromDbPointer(db, headers.records.pointer,
 		uint32(sizeOfRecord), offset*uint32(sizeOfRecord))
@@ -305,7 +326,7 @@ func readAllRecords(db database, tableID string) []Record {
 	tableScheme := headers.scheme
 	bitmapData := readAllDataFromDbPointer(&openDatabse, headers.bitmap.pointer)
 	records := make([]Record, 0)
-	sizeOfRecord := int(DB_POINTER_SIZE) * len(tableScheme.columns)
+	sizeOfRecord := int(DB_POINTER_SIZE) * tableScheme.fieldsInRecord()
 	for i := 0; i < int(headers.records.pointer.size)/sizeOfRecord; i++ {
 		if checkBitFromData(bitmapData, i) {
 			record := getRecordFromOffset(&openDatabse, &headers, uint32(i))
@@ -428,7 +449,7 @@ func initializeInternalRecordIterator(openDatabase *openDB, tableID string) (*in
 
 	bitmapData := readAllDataFromDbPointer(openDatabase, headers.bitmap.pointer)
 	recordsPointer := headers.records
-	sizeOfRecord := int(DB_POINTER_SIZE) * len(headers.scheme.columns)
+	sizeOfRecord := int(DB_POINTER_SIZE) * headers.scheme.fieldsInRecord()
 
 	return &innerTableRecordIterator{db: openDatabase, headers: &headers, bitmapData: bitmapData,
 		recordsPointer: recordsPointer.pointer, sizeOfRecord: uint32(sizeOfRecord), offset: 0}, nil
@@ -570,4 +591,8 @@ func updateRecordsViaCondition(db *openDB, tableID string, condition *conditionN
 		return err
 	}
 	return nil
+}
+
+func makeTableScheme(headers []columnHeader) tableScheme {
+	return tableScheme{columns: headers, provColumns: make([]columnHeader, 0)}
 }

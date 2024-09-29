@@ -117,11 +117,15 @@ type dbHeader struct {
 	dataBlockSize uint32
 	bitmapPointer dbPointer
 	tablesPointer dbPointer
+	provenanceOn  bool
 }
 
 type openDB struct {
-	f      IoInterface
-	header dbHeader
+	f              IoInterface
+	header         dbHeader
+	authentication ProvenanceAuthentication
+	connection     ProvenanceConnection
+	provFields     []ProvenanceField
 }
 
 type allocationFuncType func(*openDB) dbPointer

@@ -9,7 +9,8 @@ import (
 )
 
 type Record struct {
-	Fields []Field
+	Fields     []Field
+	Provenance []ProvenanceField
 }
 
 func MakeRecord(fields []Field) Record {
@@ -43,6 +44,11 @@ func serializeRecord(openDatabse *openDB, record Record) []byte {
 		fieldData := field.serialize()
 		recordData = append(recordData, serializeField(openDatabse, fieldData)...)
 	}
+
+	for _, provField := range record.Provenance {
+		fieldData := provField.serialize()
+		recordData = append(recordData, serializeField(openDatabse, fieldData)...)
+	}
 	return recordData
 }
 
@@ -51,21 +57,36 @@ func getRecordData(db *openDB, recordData []byte) []byte {
 	return readAllDataFromDbPointer(db, pointer)
 }
 
-func deserializeRecord(db *openDB, recordData []byte, tableScheme tableScheme) Record {
-	columnsInData := len(recordData) / int(DB_POINTER_SIZE)
-	assert(columnsInData == len(tableScheme.columns),
-		"mismatching column amount between table scheme and data given: "+
-			strconv.Itoa(columnsInData)+", "+strconv.Itoa(len(tableScheme.columns)))
-
+func deserializeRecordColumns(db *openDB, recordData []byte, headers []columnHeader) []Field {
 	fields := make([]Field, 0)
-	for i := 0; i < columnsInData; i++ {
+	for i := 0; i < len(headers); i++ {
 		currPointerData := recordData[i*int(DB_POINTER_SIZE) : int((i+1))*int(DB_POINTER_SIZE)]
 		currPointer := deserializeDbPointer(currPointerData)
 		currData := readAllDataFromDbPointer(db, currPointer)
-		deserializationFunc := FIELD_TYPE_SERIALIZATION[tableScheme.columns[i].columnType]
+		deserializationFunc := FIELD_TYPE_DESERIALIZATION[headers[i].columnType]
 		fields = append(fields, deserializationFunc(currData))
 	}
-	return Record{Fields: fields}
+
+	return fields
+}
+
+func deserializeRecord(db *openDB, recordData []byte, tableScheme tableScheme) Record {
+	columnsInData := len(recordData) / int(DB_POINTER_SIZE)
+	assert(columnsInData == len(tableScheme.columns)+len(tableScheme.provColumns),
+		"mismatching column amount between table scheme and data given: "+
+			strconv.Itoa(columnsInData)+", "+strconv.Itoa(len(tableScheme.columns)))
+
+	fields := deserializeRecordColumns(db, recordData, tableScheme.columns)
+	provFields := deserializeRecordColumns(db, recordData[len(tableScheme.columns)*int(DB_POINTER_SIZE):],
+		tableScheme.provColumns)
+	downcastProvFields := make([]ProvenanceField, 0)
+	for _, provField := range provFields {
+		downcastField, ok := provField.(ProvenanceField)
+		assert(ok, "failed to downcast provenance field")
+		downcastProvFields = append(downcastProvFields, downcastField)
+	}
+
+	return Record{Fields: fields, Provenance: downcastProvFields}
 }
 
 func recordsAreEqual(record1 Record, record2 Record) bool {

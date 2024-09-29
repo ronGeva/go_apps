@@ -67,6 +67,14 @@ func (iterator *jointTableRecordIterator) advanceRecord(offset int) {
 	iterator.currentRecords[offset] = iterator.tableIterators[offset].next()
 }
 
+// joins a new record (which is appended "to the left") with a joint record
+func joinRecords(left *tableCurrentRecord, right *jointRecord) *jointRecord {
+	record := Record{Fields: append(left.record.Fields, right.record.Fields...),
+		Provenance: append(left.record.Provenance, right.record.Provenance...)}
+	jointOffsets := append([]uint32{left.offset}, right.offsets...)
+	return &jointRecord{record: record, offsets: jointOffsets}
+}
+
 func (iterator *jointTableRecordIterator) nextInner(offset int) *jointRecord {
 	if offset == len(iterator.tableIterators)-1 {
 		iterator.advanceRecord(offset)
@@ -88,9 +96,7 @@ func (iterator *jointTableRecordIterator) nextInner(offset int) *jointRecord {
 	restOfTablesJointRecord := iterator.nextInner(offset + 1)
 	if restOfTablesJointRecord != nil {
 		// return the current record with the next variation of the rest of the tables' joint record
-		record := Record{Fields: append(currentRecord.record.Fields, restOfTablesJointRecord.record.Fields...)}
-		jointOffsets := append([]uint32{currentRecord.offset}, restOfTablesJointRecord.offsets...)
-		return &jointRecord{record: record, offsets: jointOffsets}
+		return joinRecords(currentRecord, restOfTablesJointRecord)
 	}
 
 	// we've finished iterating the rest of the tables, but we still have more entries to go through in

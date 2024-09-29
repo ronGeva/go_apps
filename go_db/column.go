@@ -49,12 +49,12 @@ func deserializeColumnHeader(db *openDB, schemeData []byte, offset int) (columnH
 		index: bTree}, offset
 }
 
-func initializeIndexInColumn(db *openDB, scheme *tableScheme, columnOffset int) error {
-	if columnOffset >= len(scheme.columns) {
-		return fmt.Errorf("offset %d is bigger than amount of columns %d", columnOffset, len(scheme.columns))
+func initializeIndexInColumn(db *openDB, columns []columnHeader, columnOffset int) error {
+	if columnOffset >= len(columns) {
+		return fmt.Errorf("offset %d is bigger than amount of columns %d", columnOffset, len(columns))
 	}
 
-	column := &scheme.columns[columnOffset]
+	column := &columns[columnOffset]
 
 	// if the tree was yet to be initalized for the column, initialize it
 	if column.index == nil {

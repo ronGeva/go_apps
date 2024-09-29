@@ -12,6 +12,7 @@ Structure of a local DB:
 <size of data block> - 4 bytes
 <pointer to free blocks bitmap>
 <pointer to tables array>
+<provenance on> - 1 byte (true/false)
 
 Structure of db pointer:
 <offset in the file of data block> - 4 bytes
@@ -38,6 +39,8 @@ Structure of table scheme:
 <size of column headers> - 4 bytes
 <columns headers> - variable length
 column headers appear consecutively on disk one after the other.
+Note that some of the column headers might be of Provenance columns, which are stored identically on disk,
+but are used differently in the Record object.
 
 Structure of column header:
 <column type> - 1 byte
@@ -66,12 +69,13 @@ which allows us to hold an arbitrary long sequence of bytes for every db structu
 const LOCAL_DB_CONST uint32 = 0x1414ffbc
 const DB_POINTER_SIZE uint32 = 8
 const DATA_BLOCK_SIZE_SIZE uint32 = 4
+const PROVENANCE_DATA_SIZE uint32 = 1
 const LOCAL_DB_CONST_SIZE = 4
 const DATABLOCK_BITMAP_POINTER_OFFSET = LOCAL_DB_CONST_SIZE + DATA_BLOCK_SIZE_SIZE
 const TABLES_POINTER_OFFSET = DATABLOCK_BITMAP_POINTER_OFFSET + DB_POINTER_SIZE
 
 // According to the description of the DB header
-const DB_HEADER_SIZE = LOCAL_DB_CONST_SIZE + DATA_BLOCK_SIZE_SIZE + 2*DB_POINTER_SIZE
+const DB_HEADER_SIZE = LOCAL_DB_CONST_SIZE + PROVENANCE_DATA_SIZE + DATA_BLOCK_SIZE_SIZE + 2*DB_POINTER_SIZE
 
 type databaseUniqueID struct {
 	ioType            IOType
@@ -87,18 +91,34 @@ func deserializeDbHeader(data []byte) dbHeader {
 		panic(DeserializationError{})
 	}
 
-	magic := binary.LittleEndian.Uint32(data[:LOCAL_DB_CONST_SIZE])
+	i := 0
+	magic := binary.LittleEndian.Uint32(data[i:LOCAL_DB_CONST_SIZE])
 	if magic != LOCAL_DB_CONST {
 		panic(MalformedDBError{})
 	}
-	dataBlockSize := binary.LittleEndian.Uint32(data[LOCAL_DB_CONST_SIZE : LOCAL_DB_CONST_SIZE+DATA_BLOCK_SIZE_SIZE])
-	bitmapPointer := deserializeDbPointer(data[LOCAL_DB_CONST_SIZE+DATA_BLOCK_SIZE_SIZE:])
-	tablesPointer := deserializeDbPointer(data[LOCAL_DB_CONST_SIZE+DATA_BLOCK_SIZE_SIZE+DB_POINTER_SIZE:])
+	i += LOCAL_DB_CONST_SIZE
+
+	dataBlockSize := binary.LittleEndian.Uint32(data[i : i+int(DATA_BLOCK_SIZE_SIZE)])
+	i += int(DATA_BLOCK_SIZE_SIZE)
+
+	bitmapPointer := deserializeDbPointer(data[i : i+int(DB_POINTER_SIZE)])
+	i += int(DB_POINTER_SIZE)
+
+	tablesPointer := deserializeDbPointer(data[i : i+int(DB_POINTER_SIZE)])
+	i += int(DB_POINTER_SIZE)
+
+	provenanceByte := data[i : i+1]
+	provenanceOn := true
+	if provenanceByte[0] == 0 {
+		provenanceOn = false
+	}
+	i += 1
+
 	return dbHeader{magic: magic, dataBlockSize: dataBlockSize,
-		bitmapPointer: bitmapPointer, tablesPointer: tablesPointer}
+		bitmapPointer: bitmapPointer, tablesPointer: tablesPointer, provenanceOn: provenanceOn}
 }
 
-func InitializeDB(path string) {
+func InitializeDB(path string, provenanceOn bool) {
 	f := getIOInterface(path, os.O_RDWR|os.O_CREATE|os.O_EXCL)
 	// this is a bug workaround, file is always created as read-only, change it to read-write
 	defer closeDBFile(f, 0600)
@@ -119,6 +139,11 @@ func InitializeDB(path string) {
 	f.Write(dataBlockSizeBytes)
 	f.Write(serializeDbPointer(bitmapPointer))
 	f.Write(serializeDbPointer(tablePointer))
+	if provenanceOn {
+		f.Write([]byte{byte(1)})
+	} else {
+		f.Write([]byte{byte(0)})
+	}
 
 	// write bitmap
 	f.Seek(int64(dataBlockSize), 0)
@@ -134,7 +159,7 @@ func getIOInterface(dbPath string, mode int) IoInterface {
 
 	if dbPath == IN_MEMORY_BUFFER_PATH_MAGIC {
 		if IN_MEMORY_BUFFER == nil {
-			IN_MEMORY_BUFFER, err = createInMemoryBuffer(1024 * 1024 * 20) // 20 MB
+			IN_MEMORY_BUFFER, err = createInMemoryBuffer(1024 * 1024 * 100) // 100 MB
 		}
 		f = IN_MEMORY_BUFFER
 	} else {
@@ -151,7 +176,22 @@ func getOpenDB(db database) openDB {
 
 	headerData := readFromFile(f, DB_HEADER_SIZE, 0)
 	header := deserializeDbHeader(headerData)
-	return openDB{f: f, header: header}
+
+	// create the basic openDB object with empty authentication
+	return openDB{f: f, header: header, authentication: ProvenanceAuthentication{user: "", password: ""},
+		connection: ProvenanceConnection{ipv4: 0}}
+}
+
+func getOpenDbWithProvenance(db database, prov *OpenDBProvenance) openDB {
+	openDb := getOpenDB(db)
+
+	if prov != nil {
+		openDb.authentication = prov.auth
+		openDb.connection = prov.conn
+		openDb.provFields = generateOpenDBProvenance(&openDb)
+	}
+
+	return openDb
 }
 
 func closeOpenDB(db *openDB) {
@@ -161,8 +201,4 @@ func closeOpenDB(db *openDB) {
 func GenerateDBUniqueID(identifier string) databaseUniqueID {
 	// TODO: validate identifier is valid, check DB type
 	return databaseUniqueID{ioType: LocalFile, identifyingString: identifier}
-}
-
-func GetDB(identifier databaseUniqueID) database {
-	return database{identifier}
 }
