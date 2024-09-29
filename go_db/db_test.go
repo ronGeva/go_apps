@@ -17,6 +17,12 @@ type testContext struct {
 	tableID string
 }
 
+type testTable struct {
+	name    string
+	records []Record
+	scheme  tableScheme
+}
+
 func initializeTestDB(path string) (database, string) {
 	tableID := "newTable"
 	os.Remove(path) // don't care about errors
@@ -131,7 +137,7 @@ func buildTable5() (database, string) {
 }
 
 // initializes a database with 2 tables
-func buildTable6() (database, string, string) {
+func buildTable6() (database, testTable, testTable) {
 	dbPath := "C:\\temp\\my_db"
 
 	db, _ := initializeTestDB(dbPath)
@@ -146,20 +152,27 @@ func buildTable6() (database, string, string) {
 	table2column3 := columndHeader{"table2column3", FieldTypeString, nil, dbPointer{0, 0}}
 	table2scheme := tableScheme{[]columndHeader{table2column1, table2column2, table2column3}}
 	writeNewTable(db, "table2", table2scheme)
-	return db, "table1", "table2"
+	return db, testTable{name: "table1", scheme: table1scheme}, testTable{name: "table2", scheme: table2scheme}
 }
 
-func buildTable7() (database, string, string) {
+func buildTable7() (database, testTable, testTable) {
 	db, table1, table2 := buildTable6()
 
-	addRecordToTable(db, table1, Record{Fields: []Field{IntField{100}, StringField{"Hello World"}}})
-	addRecordToTable(db, table1, Record{Fields: []Field{IntField{55}, StringField{"A string"}}})
-	addRecordToTable(db, table1, Record{Fields: []Field{IntField{-199}, StringField{"AAAAAAAA"}}})
+	table1.records = []Record{{Fields: []Field{IntField{100}, StringField{"Hello World"}}},
+		{Fields: []Field{IntField{55}, StringField{"A string"}}},
+		{Fields: []Field{IntField{-199}, StringField{"AAAAAAAA"}}}}
 
-	addRecordToTable(db, table2, Record{Fields: []Field{IntField{100}, StringField{"Goodbye world"},
-		StringField{"AAAA stringo"}}})
-	addRecordToTable(db, table2, Record{Fields: []Field{IntField{100}, StringField{"BBBBBBBBB"},
-		StringField{"CCCCCCCCCCCCC"}}})
+	table2.records = []Record{{Fields: []Field{IntField{100}, StringField{"ggggg"}, StringField{"wow"}}},
+		{Fields: []Field{IntField{55}, StringField{"b"}, StringField{"RonGeva"}}},
+		{Fields: []Field{IntField{-199}, StringField{"am a string"}, StringField{"very looooooooooooooooooong"}}}}
+
+	for _, record := range table1.records {
+		addRecordToTable(db, table1.name, record)
+	}
+
+	for _, record := range table2.records {
+		addRecordToTable(db, table2.name, record)
+	}
 
 	return db, table1, table2
 }
@@ -422,7 +435,7 @@ func TestCursorSelect2(t *testing.T) {
 
 // test select on multiple tables
 func TestCursorSelect3(t *testing.T) {
-	db, _, _ := buildTable7()
+	db, table1, table2 := buildTable7()
 	dbPath := db.id.identifyingString
 	conn, err := Connect(dbPath)
 	if err != nil {
@@ -430,12 +443,15 @@ func TestCursorSelect3(t *testing.T) {
 	}
 	cursor := conn.OpenCursor()
 
-	err = cursor.Execute("Select table1.table1column1, table2.table2column2 from table1 join table2 order by table1.table1column1")
+	query := fmt.Sprintf("Select %s.%s, %s.%s from %s join %s order by %s.%s", table1.name,
+		table1.scheme.columns[0].columnName, table2.name, table2.scheme.columns[1].columnName,
+		table1.name, table2.name, table1.name, table1.scheme.columns[0].columnName)
+	err = cursor.Execute(query)
 	if err != nil {
 		t.Fail()
 	}
 	records := cursor.FetchAll()
-	if len(records) != 6 {
+	if len(records) != len(table1.records)*len(table2.records) {
 		t.Fail()
 	}
 
