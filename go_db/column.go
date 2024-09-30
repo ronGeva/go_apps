@@ -7,14 +7,14 @@ import (
 	"github.com/ronGeva/go_apps/b_tree"
 )
 
-type columndHeader struct {
+type columnHeader struct {
 	columnName   string
 	columnType   FieldType
 	index        *b_tree.BTree
 	indexPointer dbPointer
 }
 
-func serializeColumnHeader(columnHeader columndHeader) []byte {
+func serializeColumnHeader(columnHeader columnHeader) []byte {
 	columnData := make([]byte, 0)
 	columnData = append(columnData, byte(columnHeader.columnType))
 	columnNameSizeBytes := make([]byte, 4)
@@ -25,7 +25,7 @@ func serializeColumnHeader(columnHeader columndHeader) []byte {
 	return columnData
 }
 
-func deserializeColumnHeader(db *openDB, schemeData []byte, offset int) (columndHeader, int) {
+func deserializeColumnHeader(db *openDB, schemeData []byte, offset int) (columnHeader, int) {
 	columnType := int8(schemeData[offset])
 	offset += 1
 	columnNameSize := binary.LittleEndian.Uint32(schemeData[offset : offset+4])
@@ -45,7 +45,7 @@ func deserializeColumnHeader(db *openDB, schemeData []byte, offset int) (columnd
 		bTree = tree
 	}
 
-	return columndHeader{columnType: FieldType(columnType), columnName: columnName, indexPointer: indexPointer,
+	return columnHeader{columnType: FieldType(columnType), columnName: columnName, indexPointer: indexPointer,
 		index: bTree}, offset
 }
 

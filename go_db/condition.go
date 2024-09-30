@@ -53,7 +53,7 @@ var CONDITION_FUNCS = map[conditionType]func(f Field, data []byte) (bool, error)
 	ConditionTypeGreater: checkGreater,
 }
 
-func isConditionSupported(columns []columndHeader, cond *condition) bool {
+func isConditionSupported(columns []columnHeader, cond *condition) bool {
 	supportedConditions := SUPPORTED_CONDITIONS[columns[cond.fieldIndex].columnType]
 	for _, supportedCondition := range supportedConditions {
 		if supportedCondition == cond.conditionType {

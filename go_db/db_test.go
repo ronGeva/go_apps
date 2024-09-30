@@ -37,13 +37,19 @@ func initializeTestDB1() (database, string) {
 	return initializeTestDB(path)
 }
 
-func buildTableWithDbPath1(dbPath string) (database, string) {
-	db, tableID := initializeTestDB(dbPath)
+func buildEmptyTableWithDbPath1(dbPath string) (database, string) {
+	db, table := initializeTestDB(dbPath)
+	firstColumn := columnHeader{"columnA", FieldTypeInt, nil, dbPointer{0, 0}}
+	secondColumn := columnHeader{"columnB", FieldTypeBlob, nil, dbPointer{0, 0}}
+	scheme := tableScheme{[]columnHeader{firstColumn, secondColumn}}
+	err := writeNewTable(db, table, scheme)
+	assert(err == nil, "failed to initialize new test DB")
 
-	firstColumn := columndHeader{"columnA", FieldTypeInt, nil, dbPointer{0, 0}}
-	secondColumn := columndHeader{"columnB", FieldTypeBlob, nil, dbPointer{0, 0}}
-	scheme := tableScheme{[]columndHeader{firstColumn, secondColumn}}
-	writeNewTable(db, tableID, scheme)
+	return db, table
+}
+
+func buildTableWithDbPath1(dbPath string) (database, string) {
+	db, tableID := buildEmptyTableWithDbPath1(dbPath)
 	fields := []Field{&IntField{5}, &BlobField{make([]byte, 10)}}
 	newRecord := MakeRecord(fields)
 	addRecordToTable(db, tableID, newRecord)
@@ -60,9 +66,9 @@ func buildTable1() (database, string) {
 func buildTableWithDbPath2(dbPath string) (database, string) {
 	db, tableID := initializeTestDB(dbPath)
 
-	firstColumn := columndHeader{"columnA", FieldTypeInt, nil, dbPointer{0, 0}}
-	secondColumn := columndHeader{"columnB", FieldTypeInt, nil, dbPointer{0, 0}}
-	scheme := tableScheme{[]columndHeader{firstColumn, secondColumn}}
+	firstColumn := columnHeader{"columnA", FieldTypeInt, nil, dbPointer{0, 0}}
+	secondColumn := columnHeader{"columnB", FieldTypeInt, nil, dbPointer{0, 0}}
+	scheme := tableScheme{[]columnHeader{firstColumn, secondColumn}}
 	writeNewTable(db, tableID, scheme)
 	fields := []Field{&IntField{5}, &IntField{44}}
 	newRecord := MakeRecord(fields)
@@ -81,9 +87,9 @@ func buildTable2() (database, string) {
 func buildTableWithDbPath3(dbPath string) (database, string) {
 	db, tableID := initializeTestDB(dbPath)
 
-	firstColumn := columndHeader{"IDColumn", FieldTypeInt, nil, dbPointer{0, 0}}
-	secondColumn := columndHeader{"NameColumn", FieldTypeString, nil, dbPointer{0, 0}}
-	scheme := tableScheme{[]columndHeader{firstColumn, secondColumn}}
+	firstColumn := columnHeader{"IDColumn", FieldTypeInt, nil, dbPointer{0, 0}}
+	secondColumn := columnHeader{"NameColumn", FieldTypeString, nil, dbPointer{0, 0}}
+	scheme := tableScheme{[]columnHeader{firstColumn, secondColumn}}
 	writeNewTable(db, tableID, scheme)
 	fields := []Field{&IntField{11}, &StringField{"myname"}}
 	newRecord := MakeRecord(fields)
@@ -105,10 +111,10 @@ func buildTable4() (database, string) {
 
 	db, tableID := initializeTestDB(dbPath)
 
-	firstColumn := columndHeader{"IDColumn", FieldTypeInt, nil, dbPointer{0, 0}}
-	secondColumn := columndHeader{"NameColumn", FieldTypeString, nil, dbPointer{0, 0}}
-	thirdColumn := columndHeader{"intColumn2", FieldTypeInt, nil, dbPointer{0, 0}}
-	scheme := tableScheme{[]columndHeader{firstColumn, secondColumn, thirdColumn}}
+	firstColumn := columnHeader{"IDColumn", FieldTypeInt, nil, dbPointer{0, 0}}
+	secondColumn := columnHeader{"NameColumn", FieldTypeString, nil, dbPointer{0, 0}}
+	thirdColumn := columnHeader{"intColumn2", FieldTypeInt, nil, dbPointer{0, 0}}
+	scheme := tableScheme{[]columnHeader{firstColumn, secondColumn, thirdColumn}}
 	openDatabse := getOpenDB(db)
 	initializeIndexInColumn(&openDatabse, &scheme, 0)
 	closeOpenDB(&openDatabse)
@@ -123,10 +129,10 @@ func buildTable5() (database, string) {
 
 	db, tableID := initializeTestDB(dbPath)
 
-	firstColumn := columndHeader{"IDColumn", FieldTypeInt, nil, dbPointer{0, 0}}
-	secondColumn := columndHeader{"NameColumn", FieldTypeString, nil, dbPointer{0, 0}}
-	thirdColumn := columndHeader{"intColumn2", FieldTypeInt, nil, dbPointer{0, 0}}
-	scheme := tableScheme{[]columndHeader{firstColumn, secondColumn, thirdColumn}}
+	firstColumn := columnHeader{"IDColumn", FieldTypeInt, nil, dbPointer{0, 0}}
+	secondColumn := columnHeader{"NameColumn", FieldTypeString, nil, dbPointer{0, 0}}
+	thirdColumn := columnHeader{"intColumn2", FieldTypeInt, nil, dbPointer{0, 0}}
+	scheme := tableScheme{[]columnHeader{firstColumn, secondColumn, thirdColumn}}
 	openDatabse := getOpenDB(db)
 	initializeIndexInColumn(&openDatabse, &scheme, 0)
 	initializeIndexInColumn(&openDatabse, &scheme, 2)
@@ -142,15 +148,15 @@ func buildTable6() (database, testTable, testTable) {
 
 	db, _ := initializeTestDB(dbPath)
 
-	table1column1 := columndHeader{"table1column1", FieldTypeInt, nil, dbPointer{0, 0}}
-	table1column2 := columndHeader{"table1column2", FieldTypeString, nil, dbPointer{0, 0}}
-	table1scheme := tableScheme{[]columndHeader{table1column1, table1column2}}
+	table1column1 := columnHeader{"table1column1", FieldTypeInt, nil, dbPointer{0, 0}}
+	table1column2 := columnHeader{"table1column2", FieldTypeString, nil, dbPointer{0, 0}}
+	table1scheme := tableScheme{[]columnHeader{table1column1, table1column2}}
 	writeNewTable(db, "table1", table1scheme)
 
-	table2column1 := columndHeader{"table2column1", FieldTypeInt, nil, dbPointer{0, 0}}
-	table2column2 := columndHeader{"table2column2", FieldTypeString, nil, dbPointer{0, 0}}
-	table2column3 := columndHeader{"table2column3", FieldTypeString, nil, dbPointer{0, 0}}
-	table2scheme := tableScheme{[]columndHeader{table2column1, table2column2, table2column3}}
+	table2column1 := columnHeader{"table2column1", FieldTypeInt, nil, dbPointer{0, 0}}
+	table2column2 := columnHeader{"table2column2", FieldTypeString, nil, dbPointer{0, 0}}
+	table2column3 := columnHeader{"table2column3", FieldTypeString, nil, dbPointer{0, 0}}
+	table2scheme := tableScheme{[]columnHeader{table2column1, table2column2, table2column3}}
 	writeNewTable(db, "table2", table2scheme)
 	return db, testTable{name: "table1", scheme: table1scheme}, testTable{name: "table2", scheme: table2scheme}
 }
@@ -748,9 +754,9 @@ func TestAddAlotOfRecords1(t *testing.T) {
 
 func TestStringField(t *testing.T) {
 	db, tableID := initializeTestDB1()
-	firstColumn := columndHeader{"stringColumn1", FieldTypeString, nil, dbPointer{0, 0}}
-	secondColumn := columndHeader{"stringColumn2", FieldTypeString, nil, dbPointer{0, 0}}
-	scheme := tableScheme{[]columndHeader{firstColumn, secondColumn}}
+	firstColumn := columnHeader{"stringColumn1", FieldTypeString, nil, dbPointer{0, 0}}
+	secondColumn := columnHeader{"stringColumn2", FieldTypeString, nil, dbPointer{0, 0}}
+	scheme := tableScheme{[]columnHeader{firstColumn, secondColumn}}
 	writeNewTable(db, tableID, scheme)
 
 	record1 := Record{[]Field{StringField{"Hello world"}, StringField{"goodbye world"}}}

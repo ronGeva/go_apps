@@ -221,7 +221,7 @@ func columnNamesToColumnIndexes(scheme tableScheme, nameToIndex map[string]uint3
 	return columnIndexes, nil
 }
 
-func parseSingleConditionInternal(condStrings conditionStrings, columnsScheme []columndHeader,
+func parseSingleConditionInternal(condStrings conditionStrings, columnsScheme []columnHeader,
 	nameToIndex map[string]uint32) (*condition, error) {
 	// We currently assume the first operand always refer to a column name while the
 	// second operand always refer to a value
@@ -295,7 +295,7 @@ func divideStatementByParentheses(sql string, start int, end int) ([]parentheses
 	return intervals, nil
 }
 
-func parseSingleCondition(sql string, columnsScheme []columndHeader, nameToIndex map[string]uint32,
+func parseSingleCondition(sql string, columnsScheme []columnHeader, nameToIndex map[string]uint32,
 	start int, end int) (*conditionNode, error) {
 	for i := start; i < end; i++ {
 		for operator := range CONDITION_OPERATORS {
@@ -338,7 +338,7 @@ func divideStatementByOperator(sql string, paranthesesIntervals []parenthesesInt
 	return intervals, nil
 }
 
-func parseConditionByOperator(sql string, nameToIndex map[string]uint32, columnsScheme []columndHeader,
+func parseConditionByOperator(sql string, nameToIndex map[string]uint32, columnsScheme []columnHeader,
 	parenthesesIntervals []parenthesesInterval, operatorIndex int, start int, end int) (*conditionNode, error) {
 
 	// divide by or operators
@@ -391,7 +391,7 @@ func isAtomicCondition(sql string, start int, end int) bool {
 	return true
 }
 
-func parseCondition(sql string, nameToIndex map[string]uint32, columnsScheme []columndHeader,
+func parseCondition(sql string, nameToIndex map[string]uint32, columnsScheme []columnHeader,
 	start int, end int) (*conditionNode, error) {
 	// ignore surronding whitespaces
 	for isWhitespace(rune(sql[start])) {
@@ -449,7 +449,7 @@ func endOfWhereStatement(sql string) int {
 }
 
 func parseWhereStatement(sql string, nameToIndex map[string]uint32,
-	columnsScheme []columndHeader) (*conditionNode, error) {
+	columnsScheme []columnHeader) (*conditionNode, error) {
 	whereIndex := strings.Index(sql, "where")
 	if whereIndex == -1 {
 		return nil, nil
@@ -533,7 +533,7 @@ func selectQueryColumnNamesType(columnNames stringSet) (columnNameType, error) {
 }
 
 // retrieves the column names relevant for the current query
-func tableColumnsInQuery(tableColumns []columndHeader, prependTableName bool, tableName string,
+func tableColumnsInQuery(tableColumns []columnHeader, prependTableName bool, tableName string,
 	columnNamesInQuery stringSet) []string {
 	columnsInQuery := make([]string, 0)
 	for i := range tableColumns {
@@ -576,10 +576,10 @@ func selectQueryGetTableColumns(scheme tableScheme, tableID string, columnNamesT
 }
 
 func selectQueryGetTablesColumns(db *openDB, words []string, tableIDs []string) (
-	[]uint32, map[string]uint32, []columndHeader, error) {
+	[]uint32, map[string]uint32, []columnHeader, error) {
 	selectColumns := make([]uint32, 0)
 	nameToIndex := make(map[string]uint32)
-	columnsScheme := make([]columndHeader, 0)
+	columnsScheme := make([]columnHeader, 0)
 
 	columnNames, err := columnNamesFromQuery(words)
 	if err != nil {
@@ -800,7 +800,7 @@ func parseCreateQuery(db *openDB, sql string) (*createQuery, error) {
 
 	headersStatemt := sql[headersStatementInterval.start:headersStatementInterval.end]
 	headerStrings := strings.Split(headersStatemt, ",")
-	headers := make([]columndHeader, 0)
+	headers := make([]columnHeader, 0)
 	for _, headerString := range headerStrings {
 		headerWords := stringToWords(headerString)
 		if len(headerWords) != 2 {
@@ -812,7 +812,7 @@ func parseCreateQuery(db *openDB, sql string) (*createQuery, error) {
 		if !ok {
 			return nil, fmt.Errorf("no such column type %s", columnTypeStr)
 		}
-		headers = append(headers, columndHeader{columnName: columnName, columnType: columnType})
+		headers = append(headers, columnHeader{columnName: columnName, columnType: columnType})
 	}
 	return &createQuery{tableID: tableID, scheme: tableScheme{columns: headers}}, nil
 }

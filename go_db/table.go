@@ -11,7 +11,7 @@ import (
 type recordsCallbackFunc[contextType any] func(record Record, index int, context contextType)
 
 type tableScheme struct {
-	columns []columndHeader
+	columns []columnHeader
 }
 
 func (scheme *tableScheme) indexedColumns() []uint32 {
@@ -119,7 +119,7 @@ func writeTableScheme(db *openDB, scheme tableScheme, mutablePointer mutableDbPo
 
 func parseTableScheme(db *openDB, schemeData []byte) tableScheme {
 	scheme := tableScheme{}
-	var header columndHeader
+	var header columnHeader
 	for i := 0; i < len(schemeData); {
 		header, i = deserializeColumnHeader(db, schemeData, i)
 		scheme.columns = append(scheme.columns, header)
@@ -382,7 +382,7 @@ func deleteRecord(db database, tableID string, recordIndex uint32) error {
 	return deleteRecordInternal(&openDatabse, *headers, &recordForChange{index: recordIndex, keys: keyFields})
 }
 
-func validateConditions(columns []columndHeader, recordsCondition conditionNode) bool {
+func validateConditions(columns []columnHeader, recordsCondition conditionNode) bool {
 	if recordsCondition.condition != nil {
 		cond := recordsCondition.condition
 		if int(cond.fieldIndex) >= len(columns) {
@@ -406,7 +406,7 @@ func validateConditionsJointTable(db *openDB, tableIDs []string, conditions *con
 		return true, nil
 	}
 
-	columnHeaders := make([]columndHeader, 0)
+	columnHeaders := make([]columnHeader, 0)
 	for _, tableID := range tableIDs {
 		h, err := getTableHeaders(db, tableID)
 		if err != nil {
