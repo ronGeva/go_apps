@@ -95,7 +95,7 @@ func (tree *BTree) Insert(item BTreeKeyPointerPair) error {
 	return root.insertNonFull(item)
 }
 
-func (tree *BTree) Delete(item BTreeKeyPointerPair) error {
+func (tree *BTree) Delete(key BTreeKeyType) error {
 	// Algorithm:
 	// Traverse the tree to find the leaf node in which the item resides.
 	// At every node on the way (except for the root), if the if len(children)< maxDegree/2 then fill the node.
@@ -114,7 +114,7 @@ func (tree *BTree) Delete(item BTreeKeyPointerPair) error {
 
 	root := tree.persistency.LoadNode(tree.rootPointer)
 
-	removed := root.remove(item)
+	removed := root.remove(key)
 	if !removed {
 		return BTreeErrorNotFound
 	}

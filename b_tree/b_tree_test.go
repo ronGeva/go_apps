@@ -133,7 +133,7 @@ func TestSingleInsertThenDelete(t *testing.T) {
 
 	item := BTreeKeyPointerPair{Pointer: BTreePointer(5), Key: BTreeKeyType(12)}
 	tree.Insert(item)
-	tree.Delete(item)
+	tree.Delete(item.Key)
 
 	// make sure the tree is now empty
 	if tree.rootPointer != InvalidBTreePointer {
@@ -163,7 +163,7 @@ func TestMultipleInsertThenPartialDelete(t *testing.T) {
 	deletionAmount := rand.Intn(amount / 2)
 	deletionStart := rand.Intn(amount - deletionAmount)
 	for i := deletionStart; i < deletionStart+deletionAmount; i++ {
-		tree.Delete(pairs.pairs[i])
+		tree.Delete(pairs.pairs[i].Key)
 	}
 
 	pairs.pairs = append(pairs.pairs[:deletionStart], pairs.pairs[deletionStart+deletionAmount:]...)

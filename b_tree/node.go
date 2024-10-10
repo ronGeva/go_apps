@@ -140,7 +140,7 @@ func (node *bTreeNode) fill(childIndex int) {
 	mergedNode.nodePointers = append(mergedNode.nodePointers, nodeToDelete.nodePointers...)
 	mergedNode.nextNode = nodeToDelete.nextNode
 	mergedNode.persist()
-	node.removeFromLeaf(deletionPointer)
+	node.removeFromLeaf(deletionPointer.Key)
 	node.persistency.RemoveNode(nodeToDelete.selfPointer)
 	if len(node.nodePointers) == 1 {
 		// notice this can only occur at the root, as we guaranteed all nodes except for the root
@@ -154,15 +154,15 @@ func (node *bTreeNode) fill(childIndex int) {
 	}
 }
 
-func (node *bTreeNode) findMatchingNodeIndex(item BTreeKeyPointerPair) int {
+func (node *bTreeNode) findMatchingNodeIndex(key BTreeKeyType) int {
 	// If the key is smaller than everything in this node, return the smallest child node
-	if item.Key <= node.nodePointers[0].Key {
+	if key <= node.nodePointers[0].Key {
 		return 0
 	}
 
 	for i := 1; i < len(node.nodePointers); i++ {
 		innerNodePointer := node.nodePointers[i]
-		if item.Key < innerNodePointer.Key {
+		if key < innerNodePointer.Key {
 			// everthing in the current node is bigger than key, return the previous node
 			return i - 1
 		}
@@ -172,32 +172,32 @@ func (node *bTreeNode) findMatchingNodeIndex(item BTreeKeyPointerPair) int {
 	return len(node.nodePointers) - 1
 }
 
-func (node *bTreeNode) findMatchingNode(item BTreeKeyPointerPair) (*bTreeNode, int) {
-	innerNodeIndex := node.findMatchingNodeIndex(item)
+func (node *bTreeNode) findMatchingNode(key BTreeKeyType) (*bTreeNode, int) {
+	innerNodeIndex := node.findMatchingNodeIndex(key)
 	innerNodePointer := node.nodePointers[innerNodeIndex]
 	return node.persistency.LoadNode(innerNodePointer.Pointer), innerNodeIndex
 }
 
 func (node *bTreeNode) findMatchingNodeInsert(item BTreeKeyPointerPair) *bTreeNode {
-	innerNode, innerNodeIndex := node.findMatchingNode(item)
+	innerNode, innerNodeIndex := node.findMatchingNode(item.Key)
 	if innerNode.full() {
 		node.splitChild(innerNodeIndex)
 
 		// the inner node shouldn't be full this time
-		innerNode, _ = node.findMatchingNode(item)
+		innerNode, _ = node.findMatchingNode(item.Key)
 	}
 
 	return innerNode
 }
 
-func (node *bTreeNode) findMatchingNodeDelete(item BTreeKeyPointerPair) (*bTreeNode, int) {
-	innerNode, innerNodeIndex := node.findMatchingNode(item)
+func (node *bTreeNode) findMatchingNodeDelete(key BTreeKeyType) (*bTreeNode, int) {
+	innerNode, innerNodeIndex := node.findMatchingNode(key)
 	if innerNode.halfEmpty() {
 		node.fill(innerNodeIndex)
 		node.persist()
 
 		// the inner node shouldn't be half-empty this time
-		innerNode, innerNodeIndex = node.findMatchingNode(item)
+		innerNode, innerNodeIndex = node.findMatchingNode(key)
 	}
 
 	return innerNode, innerNodeIndex
@@ -254,10 +254,10 @@ func (node *bTreeNode) insertNonFull(item BTreeKeyPointerPair) error {
 }
 
 // returns whether or not the item was removed
-func (node *bTreeNode) removeFromLeaf(item BTreeKeyPointerPair) bool {
+func (node *bTreeNode) removeFromLeaf(key BTreeKeyType) bool {
 	index := -1
 	for i := 0; i < len(node.nodePointers); i++ {
-		if node.nodePointers[i] == item {
+		if node.nodePointers[i].Key == key {
 			index = i
 			break
 		}
@@ -271,19 +271,19 @@ func (node *bTreeNode) removeFromLeaf(item BTreeKeyPointerPair) bool {
 	return true
 }
 
-func (node *bTreeNode) remove(item BTreeKeyPointerPair) bool {
+func (node *bTreeNode) remove(key BTreeKeyType) bool {
 	removed := false
 	if node.isInternal {
-		innerNode, index := node.findMatchingNodeDelete(item)
-		removed = innerNode.remove(item)
+		innerNode, index := node.findMatchingNodeDelete(key)
+		removed = innerNode.remove(key)
 
 		// if the inner node's smallest key has changed, update it in the parent
-		if removed && node.nodePointers[index].Key == item.Key {
+		if removed && node.nodePointers[index].Key == key {
 			node.nodePointers[index].Key = innerNode.nodePointers[0].Key
 			node.persist()
 		}
 	} else {
-		removed = node.removeFromLeaf(item)
+		removed = node.removeFromLeaf(key)
 		if removed && len(node.nodePointers) == 0 {
 			// This can only happen for the root node, update accordingly
 			node.persistency.RemoveNode(node.selfPointer)
