@@ -137,3 +137,31 @@ func (tree *BTree) Iterator() *BTreeIterator {
 	// reached an internal node
 	return &BTreeIterator{currentNode: currentNode, offsetInNode: 0, tree: tree}
 }
+
+func (tree *BTree) Get(key BTreeKeyType) *BTreePointer {
+	if tree.rootPointer == InvalidBTreePointer {
+		return nil
+	}
+
+	currentNode := tree.persistency.LoadNode(tree.rootPointer)
+	if currentNode == nil {
+		return nil
+	}
+
+	for currentNode.isInternal {
+		currentNode, _ = currentNode.findMatchingNode(key)
+		if currentNode == nil {
+			return nil
+		}
+	}
+
+	// currentNode is a leaf containing the value
+	for _, item := range currentNode.nodePointers {
+		if item.Key == key {
+			return &item.Pointer
+		}
+	}
+
+	// should never happen but let's return nil just in case
+	return nil
+}
