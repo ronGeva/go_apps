@@ -8,10 +8,11 @@ import "errors"
 
 // this struct contains all the information needed to modify a record from a table (update/deletion)
 // - its index (used to locate and delete/modify it)
-// - all of its key fields (used to remove it from the relevant indexes/modify its keys in the index)
+// - a partial record containing only  its key fields (used to remove it from the relevant
+// indexes/modify its keys in the index)
 type recordForChange struct {
-	index uint32
-	keys  []Field
+	index         uint32
+	partialRecord Record
 }
 
 type jointRecord struct {
@@ -135,18 +136,22 @@ func filterRecordsWorker[outputType any, mapInput any](recordsChannel <-chan rec
 	}
 }
 
-func getSubsetOfFields(record *Record, columns []uint32) []Field {
-	fields := make([]Field, 0)
+func getPartialRecord(record *Record, offsets partialRecordOffsets) Record {
+	partialRecord := Record{Fields: make([]Field, 0), Provenance: make([]ProvenanceField, 0)}
 
-	if columns == nil {
-		return fields
+	if offsets.columns == nil && offsets.provenances == nil {
+		return *record
 	}
 
-	for _, index := range columns {
-		fields = append(fields, record.Fields[index])
+	for _, index := range offsets.columns {
+		partialRecord.Fields = append(partialRecord.Fields, record.Fields[index])
 	}
 
-	return fields
+	for _, index := range offsets.provenances {
+		partialRecord.Provenance = append(partialRecord.Provenance, record.Provenance[index])
+	}
+
+	return partialRecord
 }
 
 func mapGetRecords(context recordContext, requestedColumns []uint32) Record {
@@ -155,12 +160,12 @@ func mapGetRecords(context recordContext, requestedColumns []uint32) Record {
 		return record
 	}
 
-	return Record{Fields: getSubsetOfFields(&record, requestedColumns)}
+	return getPartialRecord(&record, partialRecordOffsets{columns: requestedColumns})
 }
 
-func mapGetRecordForChange(context recordContext, keyFields []uint32) recordForChange {
-	keys := getSubsetOfFields(&context.record, keyFields)
-	return recordForChange{keys: keys, index: context.index}
+func mapGetRecordForChange(context recordContext, offsets partialRecordOffsets) recordForChange {
+	partialRecord := getPartialRecord(&context.record, offsets)
+	return recordForChange{partialRecord: partialRecord, index: context.index}
 }
 
 func waitForWorkers[outputType any](outChannel <-chan outputType, doneChannel <-chan bool, numOfWorkers uint32) []outputType {

@@ -59,16 +59,24 @@ func addRecordTestTable1(db *openDB, tableName string, first int, second []byte)
 	return err == nil
 }
 
-func writeTestTable2(db database, table string, index bool, prov *OpenDBProvenance) {
+func testTable2Scheme() tableScheme {
 	firstColumn := columnHeader{"IDColumn", FieldTypeInt, nil, dbPointer{0, 0}}
 	secondColumn := columnHeader{"NameColumn", FieldTypeString, nil, dbPointer{0, 0}}
 	thirdColumn := columnHeader{"intColumn2", FieldTypeInt, nil, dbPointer{0, 0}}
-	scheme := makeTableScheme([]columnHeader{firstColumn, secondColumn, thirdColumn})
+	return makeTableScheme([]columnHeader{firstColumn, secondColumn, thirdColumn})
+}
+
+func addIndexToTestTable(db database, prov *OpenDBProvenance, columns *[]columnHeader, offset int) {
+	openDatabse := getOpenDbWithProvenance(db, prov)
+	initializeIndexInColumn(&openDatabse, *columns, offset)
+	closeOpenDB(&openDatabse)
+}
+
+func writeTestTable2(db database, table string, index bool, prov *OpenDBProvenance) {
+	scheme := testTable2Scheme()
 
 	if index {
-		openDatabse := getOpenDbWithProvenance(db, prov)
-		initializeIndexInColumn(&openDatabse, scheme.columns, 0)
-		closeOpenDB(&openDatabse)
+		addIndexToTestTable(db, prov, &scheme.columns, 0)
 	}
 
 	writeNewTable(db, table, scheme)
@@ -224,9 +232,20 @@ func getConnectionTable2() (*testContext, error) {
 	return &testContext{db: db, cursor: cursor, tableID: tableID}, nil
 }
 
-func dummyProvenance() OpenDBProvenance {
+type testExpectedProvenanceScores struct {
+	scores []uint32
+}
+
+func dummyProvenance1() (OpenDBProvenance, testExpectedProvenanceScores) {
 	return OpenDBProvenance{auth: ProvenanceAuthentication{user: "ron", password: "1234"},
-		conn: ProvenanceConnection{ipv4: 1001}}
+			conn: ProvenanceConnection{ipv4: 1001}},
+		testExpectedProvenanceScores{scores: []uint32{1001, 4}}
+}
+
+func dummyProvenance2() (OpenDBProvenance, testExpectedProvenanceScores) {
+	return OpenDBProvenance{auth: ProvenanceAuthentication{user: "guy", password: "123456789abcdef"},
+			conn: ProvenanceConnection{ipv4: 10005}},
+		testExpectedProvenanceScores{scores: []uint32{10005, 16}}
 }
 
 func TestFullFlow(t *testing.T) {
@@ -1063,7 +1082,7 @@ func TestProvenanceSanity(t *testing.T) {
 
 	record := Record{[]Field{&IntField{55}, &BlobField{[]byte{1, 2, 3, 4, 5}}}, nil}
 
-	prov := dummyProvenance()
+	prov, expectedProvScores := dummyProvenance1()
 	openDb := getOpenDbWithProvenance(db, &prov)
 
 	_, err := addRecordOpenDb(&openDb, tableName, record)
@@ -1079,18 +1098,18 @@ func TestProvenanceSanity(t *testing.T) {
 	}
 
 	firstKey := records[0].Provenance[0].ToKey()
-	if firstKey == nil || *firstKey != 1001 {
+	if firstKey == nil || *firstKey != b_tree.BTreeKeyType(expectedProvScores.scores[0]) {
 		t.Fail()
 	}
 
 	secondKey := records[0].Provenance[1].ToKey()
-	if secondKey == nil || int(*secondKey) != len("1234") {
+	if secondKey == nil || int(*secondKey) != int(expectedProvScores.scores[1]) {
 		t.Fail()
 	}
 }
 
 func TestProvenanceJoin(t *testing.T) {
-	prov := dummyProvenance()
+	prov, _ := dummyProvenance1()
 	db, firstTable := initializeTestDbInternal(IN_MEMORY_BUFFER_PATH_MAGIC, true)
 	writeTestTable1(db, firstTable) // "newTable"
 	secondTable := "otherTable"
@@ -1134,5 +1153,74 @@ func TestProvenanceJoin(t *testing.T) {
 		if len(record.Provenance) != len(openDb.provFields)*2 {
 			t.Fail()
 		}
+	}
+}
+
+func testGetAllIndexPairs(iterator *b_tree.BTreeIterator) []b_tree.BTreeKeyPointerPair {
+	pairs := make([]b_tree.BTreeKeyPointerPair, 0)
+	pair := iterator.Next()
+	for pair != nil {
+		pairs = append(pairs, *pair)
+		pair = iterator.Next()
+	}
+
+	return pairs
+}
+
+// Create a DB, connect with multiple provenances and add records from each one.
+// Then iterate the provenance index and make sure we see the correct amount of
+// provenances as well as the correct values for each one.
+func TestProvenanceIndexSanity(t *testing.T) {
+	prov, expectedProvScores := dummyProvenance1()
+	db, tableName := initializeTestDbInternal(IN_MEMORY_BUFFER_PATH_MAGIC, true)
+
+	scheme := testTable2Scheme()
+	openDb := getOpenDbWithProvenance(db, &prov)
+	scheme.provColumns = openDb.provenanceSchemeColumns()
+	closeOpenDB(&openDb)
+
+	addIndexToTestTable(db, &prov, &scheme.provColumns, 0)
+
+	writeNewTable(db, tableName, scheme)
+
+	openDb = getOpenDbWithProvenance(db, &prov)
+	defer closeOpenDB(&openDb)
+
+	if !addRecordTestTable2(&openDb, tableName, 10111, "Aho Corasick", 1337) {
+		t.FailNow()
+	}
+	if !addRecordTestTable2(&openDb, tableName, -52, "mmmmmmm", 0) {
+		t.FailNow()
+	}
+
+	closeOpenDB(&openDb)
+
+	prov2, expectedProv2 := dummyProvenance2()
+	openDb = getOpenDbWithProvenance(db, &prov2)
+	if !addRecordTestTable2(&openDb, tableName, 1131, "AHAHAHAH", -59) {
+		t.FailNow()
+	}
+
+	headers, err := getTableHeaders(&openDb, tableName)
+	if err != nil {
+		t.FailNow()
+	}
+
+	iterator := headers.scheme.provColumns[0].index.Iterator()
+	if iterator == nil {
+		t.FailNow()
+	}
+
+	pairs := testGetAllIndexPairs(iterator)
+
+	if len(pairs) != 2 {
+		t.FailNow()
+	}
+
+	if pairs[0].Key != b_tree.BTreeKeyType(expectedProvScores.scores[0]) {
+		t.Fail()
+	}
+	if pairs[1].Key != b_tree.BTreeKeyType(expectedProv2.scores[0]) {
+		t.Fail()
 	}
 }

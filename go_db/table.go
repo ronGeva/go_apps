@@ -4,8 +4,6 @@ import (
 	"encoding/binary"
 	"fmt"
 	"strings"
-
-	"github.com/ronGeva/go_apps/b_tree"
 )
 
 type recordsCallbackFunc[contextType any] func(record Record, index int, context contextType)
@@ -15,19 +13,34 @@ type tableScheme struct {
 	provColumns []columnHeader
 }
 
+type partialRecordOffsets struct {
+	columns     []uint32
+	provenances []uint32
+}
+
 // returns the amount of expected field in each record of the table
 func (scheme *tableScheme) fieldsInRecord() int {
 	return len(scheme.columns) + len(scheme.provColumns)
 }
 
-func (scheme *tableScheme) indexedColumns() []uint32 {
-	columns := make([]uint32, 0)
-	for i := 0; i < len(scheme.columns); i++ {
-		if scheme.columns[i].index != nil {
-			columns = append(columns, uint32(i))
+func filterIndexedFields(columns []columnHeader) []uint32 {
+	indexed := make([]uint32, 0)
+	for i := 0; i < len(columns); i++ {
+		if columns[i].index != nil {
+			indexed = append(indexed, uint32(i))
 		}
 	}
-	return columns
+	return indexed
+}
+
+func (scheme *tableScheme) indexedColumns() []uint32 {
+	return filterIndexedFields(scheme.columns)
+}
+
+func (scheme *tableScheme) indexedFields() partialRecordOffsets {
+	columns := scheme.indexedColumns()
+	provenances := filterIndexedFields(scheme.provColumns)
+	return partialRecordOffsets{columns: columns, provenances: provenances}
 }
 
 /*
@@ -170,8 +183,10 @@ func initializeNewTableContent(db *openDB, tableID string, scheme tableScheme, t
 }
 
 func writeNewTableInternal(openDatabase *openDB, tableID string, scheme tableScheme) {
-	// add DB provenance to table's scheme
-	scheme.provColumns = openDatabase.provenanceSchemeColumns()
+	if len(scheme.provColumns) == 0 {
+		// add DB provenance to table's scheme
+		scheme.provColumns = openDatabase.provenanceSchemeColumns()
+	}
 
 	newTablePointer := allocateNewDataBlock(openDatabase)
 	mutablePointer := addNewTableToTablesArray(openDatabase, newTablePointer)
@@ -215,32 +230,6 @@ func findTable(openDatabse *openDB, tableID string) (*dbPointer, error) {
 	return nil, &TableNotFoundError{tableID}
 }
 
-// Adds a record to all the table's indexes
-func addRecordToIndexes(scheme *tableScheme, record Record, recordIndex uint32) error {
-	for i := 0; i < len(scheme.columns); i++ {
-		column := scheme.columns[i]
-		if column.index == nil {
-			continue
-		}
-
-		key := record.Fields[i].ToKey()
-		if key == nil {
-			// this field does not support indexing
-			continue
-		}
-
-		// recordIndex is the index of the record in the table's bitmap,
-		// which means we can easily figure out where the record is by using it
-		err := column.index.Insert(b_tree.BTreeKeyPointerPair{Pointer: b_tree.BTreePointer(recordIndex),
-			Key: *key})
-		if err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
 func writeRecordToTable(db *openDB, headers tableHeaders, recordIndex uint32, record Record) error {
 	// Find the offset of the new record
 	// TODO: handle data block extension
@@ -258,7 +247,7 @@ func writeRecordToTable(db *openDB, headers tableHeaders, recordIndex uint32, re
 		appendDataToDataBlock(db, data, uint32(recordsPointer.location))
 	}
 
-	return addRecordToIndexes(&headers.scheme, record, recordIndex)
+	return addRecordToIndexes(db, &headers.scheme, record, recordIndex)
 }
 
 func parseTableHeaders(db *openDB, tablePointer dbPointer) tableHeaders {
@@ -337,40 +326,12 @@ func readAllRecords(db database, tableID string) []Record {
 	return records
 }
 
-func removeRecordFromIndexes(record *recordForChange, scheme *tableScheme) error {
-	keyIndex := 0
-	for i := 0; i < len(scheme.columns); i++ {
-		if scheme.columns[i].index == nil {
-			continue
-		}
-
-		if keyIndex >= len(record.keys) {
-			return fmt.Errorf("missing index #%d in record for deletion, len of keys in record %d", i, len(record.keys))
-		}
-
-		index := scheme.columns[i].index
-		pointer := b_tree.BTreePointer(record.index)
-		key := record.keys[keyIndex].ToKey()
-		if key == nil {
-			return fmt.Errorf("failed to convert field to key value")
-		}
-
-		keyIndex += 1
-		err := index.Delete(b_tree.BTreeKeyPointerPair{Pointer: pointer, Key: *key})
-		if err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
 func deleteRecordInternal(db *openDB, headers tableHeaders, record *recordForChange) error {
 	if !checkBit(db, headers.bitmap.pointer, int(record.index)) {
 		return &RecordNotFoundError{}
 	}
 	writeBitToBitmap(db, headers.bitmap.location, record.index, 0)
-	return removeRecordFromIndexes(record, &headers.scheme)
+	return removeRecordFromIndexes(db, record, &headers.scheme)
 }
 
 func getTableHeaders(db *openDB, tableID string) (*tableHeaders, error) {
@@ -392,15 +353,15 @@ func deleteRecord(db database, tableID string, recordIndex uint32) error {
 		return err
 	}
 
-	keys := headers.scheme.indexedColumns()
-	keyFields := make([]Field, 0)
-	if len(keys) > 0 {
+	indexedFields := headers.scheme.indexedFields()
+	partialRecord := MakeEmptyRecord()
+	if len(indexedFields.columns) > 0 || len(indexedFields.provenances) > 0 {
 		record := getRecordFromOffset(&openDatabse, headers, recordIndex)
-		for i := 0; i < len(keys); i++ {
-			keyFields = append(keyFields, record.Fields[keys[i]])
-		}
+		partialRecord = getPartialRecord(&record, indexedFields)
 	}
-	return deleteRecordInternal(&openDatabse, *headers, &recordForChange{index: recordIndex, keys: keyFields})
+
+	return deleteRecordInternal(&openDatabse, *headers,
+		&recordForChange{index: recordIndex, partialRecord: partialRecord})
 }
 
 func validateConditions(columns []columnHeader, recordsCondition conditionNode) bool {
@@ -470,9 +431,9 @@ func deleteRecordsFromTableInternal(db *openDB, tableID string, recordsCondition
 		return err
 	}
 
-	indexedColumns := headers.scheme.indexedColumns()
+	indexedFields := headers.scheme.indexedFields()
 
-	recordsToDelete, err := mapEachRecord(db, []string{tableID}, recordsCondition, mapGetRecordForChange, indexedColumns)
+	recordsToDelete, err := mapEachRecord(db, []string{tableID}, recordsCondition, mapGetRecordForChange, indexedFields)
 	if err != nil {
 		return err
 	}
@@ -574,19 +535,25 @@ func updateRecordsViaCondition(db *openDB, tableID string, condition *conditionN
 		return err
 	}
 
-	indexedColumns := tableHeaders.scheme.indexedColumns()
+	// initialize the structure indicating which fields to update with all columns/prov columns that
+	// has an index.
+	// Then later remove all columns that have not been changed.
+	// We update all provenance columns because they might've been changed during this update.
+	changedFieldOffsets := tableHeaders.scheme.indexedFields()
+
 	columnsChanged := make([]uint32, 0)
 	for i := 0; i < len(update.changes); i++ {
 		columnsChanged = append(columnsChanged, uint32(update.changes[i].fieldIndex))
 	}
-	keysChanged := columnsIntersection(indexedColumns, columnsChanged)
+	changedFieldOffsets.columns = columnsIntersection(changedFieldOffsets.columns, columnsChanged)
 
-	records, err := mapEachRecord(db, []string{tableID}, condition, mapGetRecordForChange, keysChanged)
+	records, err := mapEachRecord(db, []string{tableID}, condition, mapGetRecordForChange, changedFieldOffsets)
 	if err != nil {
 		return err
 	}
 
-	err = updateRecords(db, *tableHeaders, records, update, keysChanged)
+	// TODO: pass provenance data to updateRecord to update the provenance as well
+	err = updateRecords(db, *tableHeaders, records, update, changedFieldOffsets.columns)
 	if err != nil {
 		return err
 	}

@@ -6,6 +6,8 @@ package go_db
 
 import (
 	"strconv"
+
+	"github.com/ronGeva/go_apps/b_tree"
 )
 
 type Record struct {
@@ -13,8 +15,20 @@ type Record struct {
 	Provenance []ProvenanceField
 }
 
+func (record *Record) getRecordKey(isProv bool, offset int) *b_tree.BTreeKeyType {
+	if isProv {
+		return record.Provenance[offset].ToKey()
+	} else {
+		return record.Fields[offset].ToKey()
+	}
+}
+
 func MakeRecord(fields []Field) Record {
 	return Record{Fields: fields}
+}
+
+func MakeEmptyRecord() Record {
+	return Record{}
 }
 
 func serializeField(openDatabase *openDB, fieldData []byte) []byte {
