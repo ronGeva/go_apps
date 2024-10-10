@@ -124,6 +124,10 @@ func (tree *BTree) Delete(key BTreeKeyType) error {
 }
 
 func (tree *BTree) Iterator() *BTreeIterator {
+	if tree.rootPointer == InvalidBTreePointer {
+		return nil
+	}
+
 	currentNode := tree.persistency.LoadNode(tree.rootPointer)
 
 	// traverse the leftside of the tree until we've reached a leaf node
