@@ -347,3 +347,24 @@ func TestEnforceNoDuplicatesBigTree(t *testing.T) {
 		t.FailNow()
 	}
 }
+
+func TestInsertManyItemsThenGet(t *testing.T) {
+	store := InitializeInMemoryPersistency()
+	tree, err := InitializeBTree(store)
+	if err != nil {
+		t.Fail()
+	}
+
+	pairs := insertRandomPairsIntoTree(tree, 1000, t)
+
+	for _, pair := range pairs {
+		pointer := tree.Get(pair.Key)
+		if pointer == nil {
+			t.FailNow()
+		}
+
+		if *pointer != pair.Pointer {
+			t.Fail()
+		}
+	}
+}
