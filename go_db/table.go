@@ -422,7 +422,9 @@ func filterRecordsFromTableInternal(openDatabase *openDB, tableIDs []string, rec
 		return nil, err
 	}
 
-	return records, nil
+	// set semantics - remove duplications from result
+	uniqueRecords := removeRecordDuplications(records)
+	return uniqueRecords, nil
 }
 
 func deleteRecordsFromTableInternal(db *openDB, tableID string, recordsCondition *conditionNode) error {
@@ -455,13 +457,11 @@ func filterRecordsFromTable(db database, tableID string, recordsCondition *condi
 	openDatabase := getOpenDB(db)
 	defer closeOpenDB(&openDatabase)
 
-	records, err := filterRecordsFromTableInternal(&openDatabase, []string{tableID}, recordsCondition, nil)
+	uniqueRecords, err := filterRecordsFromTableInternal(&openDatabase, []string{tableID}, recordsCondition, nil)
 	if err != nil {
 		return nil, err
 	}
 
-	// set semantics - remove duplications from result
-	uniqueRecords := removeRecordDuplications(records)
 	return uniqueRecords, nil
 }
 

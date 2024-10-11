@@ -116,7 +116,7 @@ func (iterator *jointTableRecordIterator) nextInner(offset int) *jointRecord {
 func (iterator *jointTableRecordIterator) next() *jointRecord {
 	record := iterator.nextInner(0)
 	if record != nil {
-		provenanceApplyJoin(&record.record)
+		provenanceApplyJoin(record)
 	}
 	return record
 }
@@ -143,14 +143,16 @@ func filterRecordsWorker[outputType any, mapInput any](recordsChannel <-chan rec
 func getPartialRecord(record *Record, offsets partialRecordOffsets) Record {
 	partialRecord := Record{Fields: make([]Field, 0), Provenance: make([]ProvenanceField, 0)}
 
-	if offsets.columns == nil && offsets.provenances == nil {
-		return *record
+	if offsets.columns == nil {
+		partialRecord.Fields = record.Fields
 	}
-
 	for _, index := range offsets.columns {
 		partialRecord.Fields = append(partialRecord.Fields, record.Fields[index])
 	}
 
+	if offsets.provenances == nil {
+		partialRecord.Provenance = record.Provenance
+	}
 	for _, index := range offsets.provenances {
 		partialRecord.Provenance = append(partialRecord.Provenance, record.Provenance[index])
 	}

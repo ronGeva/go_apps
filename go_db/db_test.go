@@ -1248,7 +1248,72 @@ func TestProvenanceIndexMultipleProvenancesInsert(t *testing.T) {
 	if pairs[0].Key != b_tree.BTreeKeyType(expectedProvScores.scores[0]) {
 		t.Fail()
 	}
+
 	if pairs[1].Key != b_tree.BTreeKeyType(expectedProv2.scores[0]) {
 		t.Fail()
+	}
+}
+
+// create a table and add a few records to it.
+// then filter record from the table such that some records will be merged due to having
+// the same values when filtered by the selection.
+// we then assert the provenance looks as we expect it to look (contains the operator "+" for
+// merged records).
+func TestProvenanceSelect(t *testing.T) {
+	prov, _ := dummyProvenance1()
+	db, firstTable := initializeTestDbInternal(IN_MEMORY_BUFFER_PATH_MAGIC, true)
+	writeTestTable2(db, firstTable, false, &prov)
+
+	openDb := getOpenDbWithProvenance(db, &prov)
+	defer closeOpenDB(&openDb)
+
+	if !addRecordTestTable2(&openDb, firstTable, 1111, "Hello", 0) {
+		t.FailNow()
+	}
+	if !addRecordTestTable2(&openDb, firstTable, 55, "a", 1) {
+		t.FailNow()
+	}
+	if !addRecordTestTable2(&openDb, firstTable, 1111, "Goodbye", 12) {
+		t.FailNow()
+	}
+	if !addRecordTestTable2(&openDb, firstTable, 1111, "heyheyhey", 1005) {
+		t.FailNow()
+	}
+
+	node1 := conditionNode{}
+	node1.condition = &condition{0, ConditionTypeEqual, uint32ToBytes(1111)}
+	records, err := filterRecordsFromTableInternal(&openDb, []string{firstTable}, nil, []uint32{0})
+	if err != nil {
+		t.FailNow()
+	}
+
+	if len(records) != 2 {
+		t.Fail()
+	}
+
+	for _, record := range records {
+		// regardless of the record, there should be exactly 2 provenance fields
+		if len(record.Provenance) != 2 {
+			t.Fail()
+		}
+
+		// the order of records isn't deterministic, check for the value of each record
+		// and verify the provenance is as expected
+		if *record.Fields[0].ToKey() == 55 {
+			// only one such record was inserted, no operator should be applied to it
+			if record.Provenance[0].operator != ProvenanceOperatorNil {
+				t.Fail()
+			}
+		}
+		if *record.Fields[0].ToKey() == 1111 {
+			// only one such record was inserted, no operator should be applied to it
+			if record.Provenance[0].operator != ProvenanceOperatorPlus {
+				t.Fail()
+			}
+			// 3 such records were inserted
+			if len(record.Provenance[0].operands) != 3 {
+				t.Fail()
+			}
+		}
 	}
 }

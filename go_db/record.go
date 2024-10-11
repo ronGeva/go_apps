@@ -125,12 +125,33 @@ func addRecordNoDuplications(uniqueRecords []Record, record Record) []Record {
 	return append(uniqueRecords, record)
 }
 
-// given a list of records, remove all duplications within it
-func removeRecordDuplications(records []Record) []Record {
+func addRecordToIdenticalRecords(identicalRecords [][]Record, record Record) [][]Record {
+	for i := range identicalRecords {
+		if recordsAreEqual(record, identicalRecords[i][0]) {
+			identicalRecords[i] = append(identicalRecords[i], record)
+			return identicalRecords
+		}
+	}
+
+	return append(identicalRecords, []Record{record})
+}
+
+func uniqueRecordsFromIdenticalRecords(identicalRecords [][]Record) []Record {
 	uniqueRecords := make([]Record, 0)
-	for _, record := range records {
-		uniqueRecords = addRecordNoDuplications(uniqueRecords, record)
+	for _, sameRecords := range identicalRecords {
+		projectedRecord := provenanceApplySelect(sameRecords)
+		uniqueRecords = append(uniqueRecords, projectedRecord)
 	}
 
 	return uniqueRecords
+}
+
+// given a list of records, remove all duplications within it
+func removeRecordDuplications(records []Record) []Record {
+	identicalRecords := make([][]Record, 0)
+	for _, record := range records {
+		identicalRecords = addRecordToIdenticalRecords(identicalRecords, record)
+	}
+
+	return uniqueRecordsFromIdenticalRecords(identicalRecords)
 }

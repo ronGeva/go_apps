@@ -242,29 +242,57 @@ type OpenDBProvenance struct {
 	conn ProvenanceConnection
 }
 
-// retrieves the provenance fields from all records, for each provenance type
-// performs the multiplication operator on all the fields, then returns the
-// resulting provenance fields
-func provenanceApplyJoin(record *Record) {
-	jointProvenance := record.Provenance
-
-	provenances := make(map[ProvenanceType][]*ProvenanceField)
-	for _, provenance := range jointProvenance {
-		fields, ok := provenances[provenance.Type]
+func provenanceApplyOperatorToProvenanceList(provenances []ProvenanceField, operator ProvenanceOperator) []ProvenanceField {
+	provenanceByType := make(map[ProvenanceType][]*ProvenanceField)
+	for _, provenance := range provenances {
+		fields, ok := provenanceByType[provenance.Type]
 		if !ok {
 			fields = make([]*ProvenanceField, 0)
 		}
 		fields = append(fields, &provenance)
 
-		provenances[provenance.Type] = fields
+		provenanceByType[provenance.Type] = fields
 	}
 
 	fields := make([]ProvenanceField, 0)
-	for provType := range provenances {
-		field := ProvenanceField{operator: ProvenanceOperatorMultiply, operands: provenances[provType],
+	for provType := range provenanceByType {
+		field := ProvenanceField{operator: operator, operands: provenanceByType[provType],
 			Type: provType}
 		fields = append(fields, field)
 	}
 
-	record.Provenance = fields
+	return fields
+}
+
+// retrieves the provenance fields from all records, for each provenance type
+// performs the multiplication operator on all the fields, then returns the
+// resulting provenance fields
+func provenanceApplyJoin(record *jointRecord) {
+	assert(len(record.offsets) > 0, "empty joint record is not supported")
+
+	if len(record.offsets) == 1 {
+		return
+	}
+
+	jointProvenance := record.record.Provenance
+	record.record.Provenance =
+		provenanceApplyOperatorToProvenanceList(jointProvenance, ProvenanceOperatorMultiply)
+}
+
+func provenanceApplySelect(identicalRecords []Record) Record {
+	assert(len(identicalRecords) > 0, "empty identical records list is not supported")
+
+	// if there is only one record with those values, don't apply any change to its provenance
+	if len(identicalRecords) == 1 {
+		return identicalRecords[0]
+	}
+
+	projectedRecord := Record{Fields: identicalRecords[0].Fields, Provenance: make([]ProvenanceField, 0)}
+	for _, record := range identicalRecords {
+		projectedRecord.Provenance = append(projectedRecord.Provenance, record.Provenance...)
+	}
+
+	projectedRecord.Provenance =
+		provenanceApplyOperatorToProvenanceList(projectedRecord.Provenance, ProvenanceOperatorPlus)
+	return projectedRecord
 }
