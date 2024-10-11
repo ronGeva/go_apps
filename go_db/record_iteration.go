@@ -114,7 +114,11 @@ func (iterator *jointTableRecordIterator) nextInner(offset int) *jointRecord {
 }
 
 func (iterator *jointTableRecordIterator) next() *jointRecord {
-	return iterator.nextInner(0)
+	record := iterator.nextInner(0)
+	if record != nil {
+		provenanceApplyJoin(&record.record)
+	}
+	return record
 }
 
 type mapFunctionType[outputType any, mapInput any] func(context recordContext, input mapInput) outputType

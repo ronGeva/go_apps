@@ -9,10 +9,17 @@ import (
 
 type ProvenanceType uint16
 type ProvenanceScore uint32
+type ProvenanceOperator uint8
 
 const (
 	ProvenanceTypeConnection ProvenanceType = iota
 	ProvenanceTypeAuthentication
+)
+
+const (
+	ProvenanceOperatorNil = iota
+	ProvenanceOperatorPlus
+	ProvenanceOperatorMultiply
 )
 
 func provenanceConnectionStringify(field Field) string {
@@ -140,8 +147,10 @@ type ProvenanceConnection struct {
 }
 
 type ProvenanceField struct {
-	Type  ProvenanceType
-	Value Field
+	Type     ProvenanceType
+	Value    Field
+	operator ProvenanceOperator
+	operands []*ProvenanceField
 }
 
 func (field ProvenanceField) getType() FieldType {
@@ -150,21 +159,29 @@ func (field ProvenanceField) getType() FieldType {
 
 func deserializeProvenanceField(data []byte) Field {
 	provType := binary.LittleEndian.Uint16(data[:2])
+	operator := ProvenanceOperator(data[2])
 
 	// pass the data past the type
-	return PROVENANCE_TYPE_TO_DESERIALIZATION_FUNC[ProvenanceType(provType)](data[2:])
+	field := PROVENANCE_TYPE_TO_DESERIALIZATION_FUNC[ProvenanceType(provType)](data[3:])
+	field.operator = operator
+	return field
 }
 
 func (field ProvenanceField) serialize() []byte {
+	assert(field.operator == ProvenanceOperatorNil, "complex provenances' serialize is not implemented")
+
 	fieldData := field.Value.serialize()
-	data := make([]byte, 2)
+	data := make([]byte, 3)
 	binary.LittleEndian.PutUint16(data, uint16(field.Type))
+	data[2] = byte(field.operator)
 	data = append(data, fieldData...)
 
 	return data
 }
 
 func (field ProvenanceField) Stringify() string {
+	assert(field.operator == ProvenanceOperatorNil, "complex provenances' stringify is not implemented")
+
 	return PROVENANCE_TYPE_TO_STRINGIFY_FUNC[field.Type](field.Value)
 }
 
@@ -181,13 +198,15 @@ func addProvenanceToRecord(db *openDB, record *Record) {
 func provenanceGenerateConnectionField(db *openDB) ProvenanceField {
 	connectionData := serializeProvenanceConnectionField(db.connection)
 	connectionField := BlobField{Data: connectionData}
-	return ProvenanceField{Type: ProvenanceTypeConnection, Value: connectionField}
+	return ProvenanceField{Type: ProvenanceTypeConnection, Value: connectionField,
+		operator: ProvenanceOperatorNil}
 }
 
 func provenanceGenerateAuthenticationField(db *openDB) ProvenanceField {
 	authData := serializeProvenanceAuthenticationField(db.authentication)
 	authField := BlobField{Data: authData}
-	return ProvenanceField{Type: ProvenanceTypeAuthentication, Value: authField}
+	return ProvenanceField{Type: ProvenanceTypeAuthentication, Value: authField,
+		operator: ProvenanceOperatorNil}
 }
 
 var PROV_COL_NAME_TO_FIELD_GENERATOR = map[string]func(db *openDB) ProvenanceField{
@@ -221,4 +240,31 @@ func generateOpenDBProvenance(db *openDB) []ProvenanceField {
 type OpenDBProvenance struct {
 	auth ProvenanceAuthentication
 	conn ProvenanceConnection
+}
+
+// retrieves the provenance fields from all records, for each provenance type
+// performs the multiplication operator on all the fields, then returns the
+// resulting provenance fields
+func provenanceApplyJoin(record *Record) {
+	jointProvenance := record.Provenance
+
+	provenances := make(map[ProvenanceType][]*ProvenanceField)
+	for _, provenance := range jointProvenance {
+		fields, ok := provenances[provenance.Type]
+		if !ok {
+			fields = make([]*ProvenanceField, 0)
+		}
+		fields = append(fields, &provenance)
+
+		provenances[provenance.Type] = fields
+	}
+
+	fields := make([]ProvenanceField, 0)
+	for provType := range provenances {
+		field := ProvenanceField{operator: ProvenanceOperatorMultiply, operands: provenances[provType],
+			Type: provType}
+		fields = append(fields, field)
+	}
+
+	record.Provenance = fields
 }

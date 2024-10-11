@@ -1108,6 +1108,17 @@ func TestProvenanceSanity(t *testing.T) {
 	}
 }
 
+func testIsProvenanceEqual(left ProvenanceField, right ProvenanceField) bool {
+	assert(left.operator == ProvenanceOperatorNil && right.operator == ProvenanceOperatorNil,
+		"only supports simple provenance fields")
+
+	if left.Type != right.Type {
+		return false
+	}
+
+	return fieldsAreEqual(left.Value, right.Value)
+}
+
 func TestProvenanceJoin(t *testing.T) {
 	prov, _ := dummyProvenance1()
 	db, firstTable := initializeTestDbInternal(IN_MEMORY_BUFFER_PATH_MAGIC, true)
@@ -1149,9 +1160,26 @@ func TestProvenanceJoin(t *testing.T) {
 	}
 
 	for _, record := range records {
-		// each table has x provenance columns, their JOIN should result in 2x prov columns
-		if len(record.Provenance) != len(openDb.provFields)*2 {
+		// each table has x provenance columns, their JOIN should have the same amount
+		if len(record.Provenance) != len(openDb.provFields) {
 			t.Fail()
+		}
+
+		for _, provField := range record.Provenance {
+			// we've perform a JOIN operation which is a logical provenance multiplication
+			if provField.operator != ProvenanceOperatorMultiply {
+				t.Fail()
+			}
+
+			// we've JOIN-ed 2 tables, each provenance should have 2 operands
+			if len(provField.operands) != 2 {
+				t.Fail()
+			}
+
+			// all fields were added by the same open db, the underlying provenance should be identical
+			if !testIsProvenanceEqual(*provField.operands[0], *provField.operands[1]) {
+				t.Fail()
+			}
 		}
 	}
 }
@@ -1170,7 +1198,7 @@ func testGetAllIndexPairs(iterator *b_tree.BTreeIterator) []b_tree.BTreeKeyPoint
 // Create a DB, connect with multiple provenances and add records from each one.
 // Then iterate the provenance index and make sure we see the correct amount of
 // provenances as well as the correct values for each one.
-func TestProvenanceIndexSanity(t *testing.T) {
+func TestProvenanceIndexMultipleProvenancesInsert(t *testing.T) {
 	prov, expectedProvScores := dummyProvenance1()
 	db, tableName := initializeTestDbInternal(IN_MEMORY_BUFFER_PATH_MAGIC, true)
 
