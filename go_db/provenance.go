@@ -10,6 +10,8 @@ import (
 type ProvenanceType uint16
 type ProvenanceScore uint32
 type ProvenanceOperator uint8
+type ProvenanceAggregationFunc func([]ProvenanceScore) ProvenanceScore
+type ProvenanceAggreationId uint8
 
 const (
 	ProvenanceTypeConnection ProvenanceType = iota
@@ -17,10 +19,60 @@ const (
 )
 
 const (
-	ProvenanceOperatorNil = iota
+	ProvenanceOperatorNil ProvenanceOperator = iota
 	ProvenanceOperatorPlus
 	ProvenanceOperatorMultiply
 )
+
+const (
+	ProvenanceAggregationMin ProvenanceAggreationId = iota
+	ProvenanceAggregationMax
+)
+
+type ProvenanceSettings struct {
+	multiplicationAggregation ProvenanceAggreationId
+	additionAggregation       ProvenanceAggreationId
+}
+
+func provenanceAggregationMinFunc(scores []ProvenanceScore) ProvenanceScore {
+	minProv := 0xffffffff
+
+	for _, score := range scores {
+		minProv = min(minProv, int(score))
+	}
+
+	return ProvenanceScore(minProv)
+}
+
+func provenanceAggregationMaxFunc(scores []ProvenanceScore) ProvenanceScore {
+	maxProv := 0
+
+	for _, score := range scores {
+		maxProv = max(maxProv, int(score))
+	}
+
+	return ProvenanceScore(maxProv)
+}
+
+var PROVENANCE_AGGREGATION_FUNCS = map[ProvenanceAggreationId]ProvenanceAggregationFunc{
+	ProvenanceAggregationMin: provenanceAggregationMinFunc,
+	ProvenanceAggregationMax: provenanceAggregationMaxFunc,
+}
+
+func provenanceOperatorAggregation(operator ProvenanceOperator, settings *ProvenanceSettings,
+	operandScores []ProvenanceScore) ProvenanceScore {
+	var aggregationId *ProvenanceAggreationId = nil
+	if operator == ProvenanceOperatorMultiply {
+		aggregationId = &settings.multiplicationAggregation
+	}
+	if operator == ProvenanceOperatorPlus {
+		aggregationId = &settings.additionAggregation
+	}
+
+	assert(aggregationId != nil, "invalid provenance operator was passed")
+
+	return PROVENANCE_AGGREGATION_FUNCS[*aggregationId](operandScores)
+}
 
 func provenanceConnectionStringify(field Field) string {
 	blobField, ok := field.(BlobField)
@@ -115,9 +167,29 @@ func provenanceAuthenticationScore(field Field) ProvenanceScore {
 	return authenticationScore(authentication)
 }
 
-var PROVENANCE_TYPE_TO_SCORE_FUNC = map[ProvenanceType]func(Field) ProvenanceScore{
-	ProvenanceTypeConnection:     provenanceConnectionScore,
-	ProvenanceTypeAuthentication: provenanceAuthenticationScore,
+func (field *ProvenanceField) simpleScore() ProvenanceScore {
+	if field.Type == ProvenanceTypeAuthentication {
+		return provenanceAuthenticationScore(field.Value)
+	}
+
+	if field.Type == ProvenanceTypeConnection {
+		return provenanceConnectionScore(field.Value)
+	}
+
+	return 0
+}
+
+func (field *ProvenanceField) Score() ProvenanceScore {
+	if field.operator == ProvenanceOperatorNil {
+		return field.simpleScore()
+	}
+
+	operandsScores := make([]ProvenanceScore, len(field.operands))
+	for i := range field.operands {
+		operandsScores[i] = field.operands[i].Score()
+	}
+
+	return provenanceOperatorAggregation(field.operator, field.settings, operandsScores)
 }
 
 func deserializeProvenanceAuthentication(data []byte) ProvenanceField {
@@ -151,6 +223,7 @@ type ProvenanceField struct {
 	Value    Field
 	operator ProvenanceOperator
 	operands []*ProvenanceField
+	settings *ProvenanceSettings
 }
 
 func (field ProvenanceField) getType() FieldType {
@@ -186,7 +259,7 @@ func (field ProvenanceField) Stringify() string {
 }
 
 func (field ProvenanceField) ToKey() *b_tree.BTreeKeyType {
-	score := PROVENANCE_TYPE_TO_SCORE_FUNC[field.Type](field.Value)
+	score := field.Score()
 	key := b_tree.BTreeKeyType(int(score))
 	return &key
 }
@@ -238,26 +311,32 @@ func generateOpenDBProvenance(db *openDB) []ProvenanceField {
 }
 
 type OpenDBProvenance struct {
-	auth ProvenanceAuthentication
-	conn ProvenanceConnection
+	auth     ProvenanceAuthentication
+	conn     ProvenanceConnection
+	settings ProvenanceSettings
 }
 
 func provenanceApplyOperatorToProvenanceList(provenances []ProvenanceField, operator ProvenanceOperator) []ProvenanceField {
+	var provSettings *ProvenanceSettings = nil
+	if len(provenances) > 0 {
+		provSettings = provenances[0].settings
+	}
+
 	provenanceByType := make(map[ProvenanceType][]*ProvenanceField)
-	for _, provenance := range provenances {
-		fields, ok := provenanceByType[provenance.Type]
+	for i := range provenances {
+		fields, ok := provenanceByType[provenances[i].Type]
 		if !ok {
 			fields = make([]*ProvenanceField, 0)
 		}
-		fields = append(fields, &provenance)
+		fields = append(fields, &provenances[i])
 
-		provenanceByType[provenance.Type] = fields
+		provenanceByType[provenances[i].Type] = fields
 	}
 
 	fields := make([]ProvenanceField, 0)
 	for provType := range provenanceByType {
 		field := ProvenanceField{operator: operator, operands: provenanceByType[provType],
-			Type: provType}
+			Type: provType, settings: provSettings}
 		fields = append(fields, field)
 	}
 
@@ -295,4 +374,17 @@ func provenanceApplySelect(identicalRecords []Record) Record {
 	projectedRecord.Provenance =
 		provenanceApplyOperatorToProvenanceList(projectedRecord.Provenance, ProvenanceOperatorPlus)
 	return projectedRecord
+}
+
+func provenanceDeserializeRecordProvenanceFields(db *openDB, provData []byte, scheme *tableScheme) []ProvenanceField {
+	provFields := deserializeRecordColumns(db, provData, scheme.provColumns)
+	downcastProvFields := make([]ProvenanceField, 0)
+	for _, provField := range provFields {
+		downcastField, ok := provField.(ProvenanceField)
+		assert(ok, "failed to downcast provenance field")
+		downcastField.settings = &db.provSettings
+		downcastProvFields = append(downcastProvFields, downcastField)
+	}
+
+	return downcastProvFields
 }

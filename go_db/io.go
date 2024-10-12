@@ -126,6 +126,7 @@ type openDB struct {
 	authentication ProvenanceAuthentication
 	connection     ProvenanceConnection
 	provFields     []ProvenanceField
+	provSettings   ProvenanceSettings
 }
 
 type allocationFuncType func(*openDB) dbPointer

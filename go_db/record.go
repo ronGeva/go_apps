@@ -91,16 +91,9 @@ func deserializeRecord(db *openDB, recordData []byte, tableScheme tableScheme) R
 			strconv.Itoa(columnsInData)+", "+strconv.Itoa(len(tableScheme.columns)))
 
 	fields := deserializeRecordColumns(db, recordData, tableScheme.columns)
-	provFields := deserializeRecordColumns(db, recordData[len(tableScheme.columns)*int(DB_POINTER_SIZE):],
-		tableScheme.provColumns)
-	downcastProvFields := make([]ProvenanceField, 0)
-	for _, provField := range provFields {
-		downcastField, ok := provField.(ProvenanceField)
-		assert(ok, "failed to downcast provenance field")
-		downcastProvFields = append(downcastProvFields, downcastField)
-	}
-
-	return Record{Fields: fields, Provenance: downcastProvFields}
+	provData := recordData[len(tableScheme.columns)*int(DB_POINTER_SIZE):]
+	provFields := provenanceDeserializeRecordProvenanceFields(db, provData, &tableScheme)
+	return Record{Fields: fields, Provenance: provFields}
 }
 
 func recordsAreEqual(record1 Record, record2 Record) bool {

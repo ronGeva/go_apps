@@ -236,16 +236,21 @@ type testExpectedProvenanceScores struct {
 	scores []uint32
 }
 
+func testDefaultProvSettings() *ProvenanceSettings {
+	return &ProvenanceSettings{multiplicationAggregation: ProvenanceAggregationMin,
+		additionAggregation: ProvenanceAggregationMax}
+}
+
 func dummyProvenance1() (OpenDBProvenance, testExpectedProvenanceScores) {
 	return OpenDBProvenance{auth: ProvenanceAuthentication{user: "ron", password: "1234"},
-			conn: ProvenanceConnection{ipv4: 1001}},
+			conn: ProvenanceConnection{ipv4: 1001}, settings: *testDefaultProvSettings()},
 		testExpectedProvenanceScores{scores: []uint32{1001, 4}}
 }
 
 func dummyProvenance2() (OpenDBProvenance, testExpectedProvenanceScores) {
 	return OpenDBProvenance{auth: ProvenanceAuthentication{user: "guy", password: "123456789abcdef"},
-			conn: ProvenanceConnection{ipv4: 10005}},
-		testExpectedProvenanceScores{scores: []uint32{10005, 16}}
+			conn: ProvenanceConnection{ipv4: 10005}, settings: *testDefaultProvSettings()},
+		testExpectedProvenanceScores{scores: []uint32{10005, 15}}
 }
 
 func TestFullFlow(t *testing.T) {
@@ -1119,6 +1124,22 @@ func testIsProvenanceEqual(left ProvenanceField, right ProvenanceField) bool {
 	return fieldsAreEqual(left.Value, right.Value)
 }
 
+func testGetAllJointRecords(openDb *openDB, t *testing.T, tableNames []string) []Record {
+	iterator, err := initializeJointTableRecordIterator(openDb, tableNames)
+	if err != nil {
+		t.FailNow()
+	}
+
+	records := make([]Record, 0)
+	record := iterator.next()
+	for record != nil {
+		records = append(records, record.record)
+		record = iterator.next()
+	}
+
+	return records
+}
+
 func TestProvenanceJoin(t *testing.T) {
 	prov, _ := dummyProvenance1()
 	db, firstTable := initializeTestDbInternal(IN_MEMORY_BUFFER_PATH_MAGIC, true)
@@ -1143,17 +1164,7 @@ func TestProvenanceJoin(t *testing.T) {
 		t.FailNow()
 	}
 
-	iterator, err := initializeJointTableRecordIterator(&openDb, []string{"newTable", "otherTable"})
-	if err != nil {
-		t.FailNow()
-	}
-
-	records := make([]Record, 0)
-	record := iterator.next()
-	for record != nil {
-		records = append(records, record.record)
-		record = iterator.next()
-	}
+	records := testGetAllJointRecords(&openDb, t, []string{"newTable", "otherTable"})
 
 	if len(records) != 4 {
 		t.Fail()
@@ -1312,6 +1323,164 @@ func TestProvenanceSelect(t *testing.T) {
 			}
 			// 3 such records were inserted
 			if len(record.Provenance[0].operands) != 3 {
+				t.Fail()
+			}
+
+			if record.Provenance[0].ToKey() == nil {
+				t.Fail()
+			}
+		}
+	}
+}
+
+func testCreateMultiProvenanceDB(t *testing.T) (database, string, string) {
+	// create a DB
+	db, _ := initializeTestDbInternal(IN_MEMORY_BUFFER_PATH_MAGIC, true)
+	firstTable := "firstTable"
+	secondTable := "secondTable"
+
+	// create 2 tables
+	writeTestTable1(db, firstTable)
+	writeTestTable2(db, secondTable, false, nil)
+
+	firstProv, _ := dummyProvenance1()
+	openDb := getOpenDbWithProvenance(db, &firstProv)
+
+	if !addRecordTestTable1(&openDb, firstTable, 105, []byte{0}) {
+		t.FailNow()
+	}
+	if !addRecordTestTable1(&openDb, firstTable, 12, []byte{0}) {
+		t.FailNow()
+	}
+
+	if !addRecordTestTable2(&openDb, secondTable, 1111, "Hello", 0) {
+		t.FailNow()
+	}
+	if !addRecordTestTable2(&openDb, secondTable, 55, "a", 1) {
+		t.FailNow()
+	}
+
+	closeOpenDB(&openDb)
+
+	secondProv, _ := dummyProvenance2()
+	openDb = getOpenDbWithProvenance(db, &secondProv)
+	if !addRecordTestTable1(&openDb, firstTable, 113, []byte{17, 176}) {
+		t.FailNow()
+	}
+	if !addRecordTestTable1(&openDb, firstTable, 105, []byte{0, 1, 2}) {
+		t.FailNow()
+	}
+
+	closeOpenDB(&openDb)
+	return db, firstTable, secondTable
+}
+
+func testGetIntFieldValue(field Field, t *testing.T) int {
+	intField, ok := field.(IntField)
+	if !ok {
+		t.FailNow()
+	}
+
+	return intField.Value
+}
+
+func testRecordProvenanceScoresByProvenanceType(record Record) map[ProvenanceType]ProvenanceScore {
+	provByType := make(map[ProvenanceType]ProvenanceScore)
+	for _, provFied := range record.Provenance {
+		provByType[provFied.Type] = provFied.Score()
+	}
+
+	return provByType
+}
+
+func testDummyProvenanceAdditionAggregationFunc(operands []ProvenanceScore) ProvenanceScore {
+	// sum the scores
+	s := 0
+	for _, op := range operands {
+		s += int(op)
+	}
+
+	return ProvenanceScore(s)
+}
+
+func testDummyProvenanceMultiplicationAggregationFunc(operands []ProvenanceScore) ProvenanceScore {
+	// multiply the scores
+	s := 1
+	for _, op := range operands {
+		s *= int(op)
+	}
+
+	return ProvenanceScore(s)
+}
+
+func TestProvenanceAggregation(t *testing.T) {
+	db, table1, table2 := testCreateMultiProvenanceDB(t)
+
+	firstProv, firstExpectedProv := dummyProvenance1()
+	_, secondExpectedProv := dummyProvenance2()
+	openDb := getOpenDbWithProvenance(db, &firstProv)
+
+	// override the implemented aggregation funcs with a simple sum/multiplication aggregation funcs
+	PROVENANCE_AGGREGATION_FUNCS[ProvenanceAggregationMin] = testDummyProvenanceMultiplicationAggregationFunc
+	PROVENANCE_AGGREGATION_FUNCS[ProvenanceAggregationMax] = testDummyProvenanceAdditionAggregationFunc
+
+	// perform a JOIN between the two table and retrieve all the unique values of the first
+	// column in the first table
+	records, err := filterRecordsFromTableInternal(&openDb, []string{table1, table2}, nil, []uint32{0})
+	if err != nil {
+		t.FailNow()
+	}
+
+	// we should have 3 unique values: 12, 113 and 105
+	if len(records) != 3 {
+		t.FailNow()
+	}
+
+	firstProvExpectedConnectionScore := int(firstExpectedProv.scores[0])
+	secondProvExpectedConnectionScore := int(secondExpectedProv.scores[0])
+	firstProvExpectedAuthenticationScore := int(firstExpectedProv.scores[1])
+	secondProvExpectedAuthenticationScore := int(secondExpectedProv.scores[1])
+	for _, record := range records {
+		val := testGetIntFieldValue(record.Fields[0], t)
+		scoreByType := testRecordProvenanceScoresByProvenanceType(record)
+		recordAuthenticationScore := scoreByType[ProvenanceTypeAuthentication]
+		recordConnectionScore := scoreByType[ProvenanceTypeConnection]
+
+		if val == 12 {
+			// The aggregation of all lines with this value should have the provenance:
+			// <firstProv>*<firstProv> + <firstProv>*<firstProv>
+			// In all current aggregation funcs this will be equivalent to the original provenance score.
+			if int(recordAuthenticationScore) !=
+				firstProvExpectedAuthenticationScore*firstProvExpectedAuthenticationScore*2 {
+				t.Fail()
+			}
+			if int(recordConnectionScore) != firstProvExpectedConnectionScore*firstProvExpectedConnectionScore*2 {
+				t.Fail()
+			}
+		}
+		if val == 113 {
+			// The aggregation of all lines with this value should have the provenance:
+			// <secondProv>*<firstProv> + <secondProv>*<firstProv>
+			// In all current aggregation funcs this will be equivalent to the minimum between the two
+			if int(recordAuthenticationScore) !=
+				secondProvExpectedAuthenticationScore*firstProvExpectedAuthenticationScore*2 {
+				t.Fail()
+			}
+			if int(recordConnectionScore) !=
+				secondProvExpectedConnectionScore*firstProvExpectedConnectionScore*2 {
+				t.Fail()
+			}
+		}
+		if val == 105 {
+			// The aggregation of all lines with this value should have the provenance:
+			// <firstProv>*<firstProv> + <firstProv>*<firstProv> + <secondProv>*<firstProv> + <secondProv>*<firstProv>
+			// In all current aggregation funcs this will be equivalent to the maximum between the two
+			if int(recordAuthenticationScore) != firstProvExpectedAuthenticationScore*firstProvExpectedAuthenticationScore*2+
+				firstProvExpectedAuthenticationScore*secondProvExpectedAuthenticationScore*2 {
+				t.Fail()
+			}
+			if int(recordConnectionScore) != firstProvExpectedConnectionScore*firstProvExpectedConnectionScore*2+
+				firstProvExpectedConnectionScore*secondProvExpectedConnectionScore*2 {
 				t.Fail()
 			}
 		}

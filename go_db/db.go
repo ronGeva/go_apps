@@ -188,6 +188,7 @@ func getOpenDbWithProvenance(db database, prov *OpenDBProvenance) openDB {
 	if prov != nil {
 		openDb.authentication = prov.auth
 		openDb.connection = prov.conn
+		openDb.provSettings = prov.settings
 		openDb.provFields = generateOpenDBProvenance(&openDb)
 	}
 
