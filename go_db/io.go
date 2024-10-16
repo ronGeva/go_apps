@@ -121,6 +121,7 @@ type dbHeader struct {
 }
 
 type openDB struct {
+	db             database
 	f              IoInterface
 	header         dbHeader
 	authentication ProvenanceAuthentication

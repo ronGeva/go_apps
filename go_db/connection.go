@@ -3,7 +3,9 @@ package go_db
 import "sort"
 
 type Connection struct {
-	db database
+	db   database
+	auth *ProvenanceAuthentication
+	conn *ProvenanceConnection
 }
 
 type Cursor struct {
@@ -19,9 +21,9 @@ var QUERY_TYPE_TO_FUNC = map[queryType]func(*openDB, *Cursor, string) error{
 	QueryTypeUpdate: ExecuteUpdateQuery,
 }
 
-func Connect(path string) (Connection, error) {
+func Connect(path string, auth *ProvenanceAuthentication, conn *ProvenanceConnection) (Connection, error) {
 	db := database{id: databaseUniqueID{ioType: LocalFile, identifyingString: path}}
-	return Connection{db: db}, nil
+	return Connection{db: db, auth: auth, conn: conn}, nil
 }
 
 func (conn *Connection) OpenCursor() Cursor {
@@ -46,7 +48,7 @@ func ExecuteSelectQuery(openDatabse *openDB, cursor *Cursor, sql string) error {
 	if err != nil {
 		return err
 	}
-	records, err := filterRecordsFromTableInternal(openDatabse, query.tableIDs, query.condition, query.columns)
+	records, err := filterRecordsFromTables(openDatabse, query.tableIDs, query.condition, query.columns)
 	if err != nil {
 		return err
 	}
@@ -66,7 +68,7 @@ func ExecuteInsertQuery(openDatabse *openDB, cursor *Cursor, sql string) error {
 	}
 	// TODO: optimize this for a slice of records instead of inserting each one
 	for _, record := range query.records {
-		addRecordOpenDb(openDatabse, query.tableID, record)
+		addRecordToTable(openDatabse, query.tableID, record)
 	}
 
 	return nil
@@ -78,7 +80,7 @@ func ExecuteDeleteQuery(openDatabse *openDB, cursor *Cursor, sql string) error {
 		return err
 	}
 
-	return deleteRecordsFromTableInternal(openDatabse, query.tableID, query.condition)
+	return deleteRecordsFromTable(openDatabse, query.tableID, query.condition)
 }
 
 func ExecuteCreateQuery(openDatabase *openDB, cursor *Cursor, sql string) error {
@@ -86,8 +88,7 @@ func ExecuteCreateQuery(openDatabase *openDB, cursor *Cursor, sql string) error 
 	if err != nil {
 		return err
 	}
-	writeNewTableInternal(openDatabase, query.tableID, query.scheme)
-	return nil
+	return writeNewTable(openDatabase, query.tableID, query.scheme)
 }
 
 func ExecuteUpdateQuery(openDatabase *openDB, cursor *Cursor, sql string) error {
@@ -104,10 +105,20 @@ func (cursor *Cursor) Execute(sql string) error {
 	if err != nil {
 		return nil
 	}
-	openDatabse := getOpenDB(cursor.conn.db)
-	defer closeOpenDB(&openDatabse)
 
-	err = QUERY_TYPE_TO_FUNC[queryType](&openDatabse, cursor, sql)
+	var prov *OpenDBProvenance = nil
+	if cursor.conn.auth != nil && cursor.conn.conn != nil {
+		prov = &OpenDBProvenance{auth: *cursor.conn.auth, conn: *cursor.conn.conn}
+	}
+
+	openDatabase, err := getOpenDB(cursor.conn.db, prov)
+	if err != nil {
+		return err
+	}
+
+	defer closeOpenDB(openDatabase)
+
+	err = QUERY_TYPE_TO_FUNC[queryType](openDatabase, cursor, sql)
 	if err != nil {
 		return err
 	}

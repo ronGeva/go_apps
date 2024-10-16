@@ -2,6 +2,7 @@ package go_db
 
 import (
 	"encoding/binary"
+	"fmt"
 	"os"
 )
 
@@ -171,20 +172,22 @@ func getIOInterface(dbPath string, mode int) IoInterface {
 	return f
 }
 
-func getOpenDB(db database) openDB {
+func getOpenDB(db database, prov *OpenDBProvenance) (*openDB, error) {
 	f := getIOInterface(db.id.identifyingString, os.O_RDWR)
 
 	headerData := readFromFile(f, DB_HEADER_SIZE, 0)
 	header := deserializeDbHeader(headerData)
 
+	provOn := header.provenanceOn
+	provSupplied := prov != nil
+	if provOn != provSupplied {
+		return nil, fmt.Errorf("db provenance fields do not much provenance supplied: %t, %t", provOn, provSupplied)
+	}
+
 	// create the basic openDB object with empty authentication
-	return openDB{f: f, header: header, authentication: ProvenanceAuthentication{user: "", password: ""},
-		connection: ProvenanceConnection{ipv4: 0}}
-}
-
-func getOpenDbWithProvenance(db database, prov *OpenDBProvenance) openDB {
-	openDb := getOpenDB(db)
-
+	openDb := openDB{db: db, f: f, header: header,
+		authentication: ProvenanceAuthentication{user: "", password: ""},
+		connection:     ProvenanceConnection{ipv4: 0}}
 	if prov != nil {
 		openDb.authentication = prov.auth
 		openDb.connection = prov.conn
@@ -192,7 +195,7 @@ func getOpenDbWithProvenance(db database, prov *OpenDBProvenance) openDB {
 		openDb.provFields = generateOpenDBProvenance(&openDb)
 	}
 
-	return openDb
+	return &openDb, nil
 }
 
 func closeOpenDB(db *openDB) {

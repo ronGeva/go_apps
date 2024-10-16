@@ -182,7 +182,12 @@ func initializeNewTableContent(db *openDB, tableID string, scheme tableScheme, t
 	tablePointer.pointer.size += DB_POINTER_SIZE
 }
 
-func writeNewTableInternal(openDatabase *openDB, tableID string, scheme tableScheme) {
+func writeNewTable(openDatabase *openDB, tableID string, scheme tableScheme) error {
+	_, err := findTable(openDatabase, tableID)
+	if _, ok := err.(*TableNotFoundError); !ok {
+		return fmt.Errorf("table %s already exists", tableID)
+	}
+
 	if len(scheme.provColumns) == 0 {
 		// add DB provenance to table's scheme
 		scheme.provColumns = openDatabase.provenanceSchemeColumns()
@@ -191,27 +196,6 @@ func writeNewTableInternal(openDatabase *openDB, tableID string, scheme tableSch
 	newTablePointer := allocateNewDataBlock(openDatabase)
 	mutablePointer := addNewTableToTablesArray(openDatabase, newTablePointer)
 	initializeNewTableContent(openDatabase, tableID, scheme, &mutablePointer)
-}
-
-func writeNewTableLocalFile(db database, tableID string, scheme tableScheme) {
-	openDatabase := getOpenDB(db)
-	defer closeOpenDB(&openDatabase)
-	writeNewTableInternal(&openDatabase, tableID, scheme)
-}
-
-func writeNewTable(db database, tableID string, scheme tableScheme) error {
-	if db.id.ioType != LocalFile {
-		panic(UnsupportedError{})
-	}
-	openDatabase := getOpenDB(db)
-	defer closeOpenDB(&openDatabase)
-
-	_, err := findTable(&openDatabase, tableID)
-	if _, ok := err.(*TableNotFoundError); !ok {
-		return fmt.Errorf("table %s already exists", tableID)
-	}
-
-	writeNewTableInternal(&openDatabase, tableID, scheme)
 
 	return nil
 }
@@ -282,17 +266,11 @@ func addRecordToTableInternal(db *openDB, tablePointer dbPointer, record Record)
 	return firstAvailableRecordNum, nil
 }
 
-func addRecordOpenDb(db *openDB, tableID string, record Record) (uint32, error) {
+// returns the record index in the table
+func addRecordToTable(db *openDB, tableID string, record Record) (uint32, error) {
 	tablePointer, err := findTable(db, tableID)
 	check(err)
 	return addRecordToTableInternal(db, *tablePointer, record)
-}
-
-// returns the record index in the table
-func addRecordToTable(db database, tableID string, record Record) (uint32, error) {
-	openDatabse := getOpenDB(db)
-	defer closeOpenDB(&openDatabse)
-	return addRecordOpenDb(&openDatabse, tableID, record)
 }
 
 func getRecordFromOffset(db *openDB, headers *tableHeaders, offset uint32) Record {
@@ -304,21 +282,18 @@ func getRecordFromOffset(db *openDB, headers *tableHeaders, offset uint32) Recor
 	return deserializeRecord(db, recordData, headers.scheme)
 }
 
-func readAllRecords(db database, tableID string) []Record {
-	openDatabse := getOpenDB(db)
-	defer closeOpenDB(&openDatabse)
-
-	tablePointer, err := findTable(&openDatabse, tableID)
+func readAllRecords(db *openDB, tableID string) []Record {
+	tablePointer, err := findTable(db, tableID)
 	check(err)
-	headers := parseTableHeaders(&openDatabse, *tablePointer)
+	headers := parseTableHeaders(db, *tablePointer)
 
 	tableScheme := headers.scheme
-	bitmapData := readAllDataFromDbPointer(&openDatabse, headers.bitmap.pointer)
+	bitmapData := readAllDataFromDbPointer(db, headers.bitmap.pointer)
 	records := make([]Record, 0)
 	sizeOfRecord := int(DB_POINTER_SIZE) * tableScheme.fieldsInRecord()
 	for i := 0; i < int(headers.records.pointer.size)/sizeOfRecord; i++ {
 		if checkBitFromData(bitmapData, i) {
-			record := getRecordFromOffset(&openDatabse, &headers, uint32(i))
+			record := getRecordFromOffset(db, &headers, uint32(i))
 			records = append(records, record)
 		}
 	}
@@ -344,11 +319,8 @@ func getTableHeaders(db *openDB, tableID string) (*tableHeaders, error) {
 	return &headers, nil
 }
 
-func deleteRecord(db database, tableID string, recordIndex uint32) error {
-	openDatabse := getOpenDB(db)
-	defer closeOpenDB(&openDatabse)
-
-	headers, err := getTableHeaders(&openDatabse, tableID)
+func deleteRecord(db *openDB, tableID string, recordIndex uint32) error {
+	headers, err := getTableHeaders(db, tableID)
 	if err != nil {
 		return err
 	}
@@ -356,11 +328,11 @@ func deleteRecord(db database, tableID string, recordIndex uint32) error {
 	indexedFields := headers.scheme.indexedFields()
 	partialRecord := MakeEmptyRecord()
 	if len(indexedFields.columns) > 0 || len(indexedFields.provenances) > 0 {
-		record := getRecordFromOffset(&openDatabse, headers, recordIndex)
+		record := getRecordFromOffset(db, headers, recordIndex)
 		partialRecord = getPartialRecord(&record, indexedFields)
 	}
 
-	return deleteRecordInternal(&openDatabse, *headers,
+	return deleteRecordInternal(db, *headers,
 		&recordForChange{index: recordIndex, partialRecord: partialRecord})
 }
 
@@ -416,7 +388,7 @@ func initializeInternalRecordIterator(openDatabase *openDB, tableID string) (*in
 		recordsPointer: recordsPointer.pointer, sizeOfRecord: uint32(sizeOfRecord), offset: 0}, nil
 }
 
-func filterRecordsFromTableInternal(openDatabase *openDB, tableIDs []string, recordsCondition *conditionNode, columns []uint32) ([]Record, error) {
+func filterRecordsFromTables(openDatabase *openDB, tableIDs []string, recordsCondition *conditionNode, columns []uint32) ([]Record, error) {
 	records, err := mapEachRecord(openDatabase, tableIDs, recordsCondition, mapGetRecords, columns)
 	if err != nil {
 		return nil, err
@@ -427,7 +399,7 @@ func filterRecordsFromTableInternal(openDatabase *openDB, tableIDs []string, rec
 	return uniqueRecords, nil
 }
 
-func deleteRecordsFromTableInternal(db *openDB, tableID string, recordsCondition *conditionNode) error {
+func deleteRecordsFromTable(db *openDB, tableID string, recordsCondition *conditionNode) error {
 	headers, err := getTableHeaders(db, tableID)
 	if err != nil {
 		return err
@@ -444,25 +416,6 @@ func deleteRecordsFromTableInternal(db *openDB, tableID string, recordsCondition
 		deleteRecordInternal(db, *headers, &recordForDeletion)
 	}
 	return nil
-}
-
-func deleteRecordsFromTable(db database, tableID string, recordsCondition *conditionNode) error {
-	openDatabase := getOpenDB(db)
-	defer closeOpenDB(&openDatabase)
-
-	return deleteRecordsFromTableInternal(&openDatabase, tableID, recordsCondition)
-}
-
-func filterRecordsFromTable(db database, tableID string, recordsCondition *conditionNode) ([]Record, error) {
-	openDatabase := getOpenDB(db)
-	defer closeOpenDB(&openDatabase)
-
-	uniqueRecords, err := filterRecordsFromTableInternal(&openDatabase, []string{tableID}, recordsCondition, nil)
-	if err != nil {
-		return nil, err
-	}
-
-	return uniqueRecords, nil
 }
 
 func updateField(db *openDB, headers tableHeaders, offset uint32, change recordChange) error {
