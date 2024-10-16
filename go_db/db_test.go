@@ -23,6 +23,8 @@ type testTable struct {
 	scheme  tableScheme
 }
 
+type proveTypeToScore map[ProvenanceType]ProvenanceScore
+
 const TEST_DB_PATH1 = "c:\\temp\\my_db"
 
 func testDatabaseFromPath(path string) database {
@@ -249,7 +251,7 @@ func getConnectionTable2() (*testContext, error) {
 }
 
 type testExpectedProvenanceScores struct {
-	scores []uint32
+	scores proveTypeToScore
 }
 
 func testDefaultProvSettings() *ProvenanceSettings {
@@ -260,13 +262,15 @@ func testDefaultProvSettings() *ProvenanceSettings {
 func dummyProvenance1() (OpenDBProvenance, testExpectedProvenanceScores) {
 	return OpenDBProvenance{auth: ProvenanceAuthentication{user: "ron", password: "1234"},
 			conn: ProvenanceConnection{ipv4: 1001}, settings: *testDefaultProvSettings()},
-		testExpectedProvenanceScores{scores: []uint32{1001, 4}}
+		testExpectedProvenanceScores{
+			scores: proveTypeToScore{ProvenanceTypeConnection: 1001, ProvenanceTypeAuthentication: 4}}
 }
 
 func dummyProvenance2() (OpenDBProvenance, testExpectedProvenanceScores) {
 	return OpenDBProvenance{auth: ProvenanceAuthentication{user: "guy", password: "123456789abcdef"},
 			conn: ProvenanceConnection{ipv4: 10005}, settings: *testDefaultProvSettings()},
-		testExpectedProvenanceScores{scores: []uint32{10005, 15}}
+		testExpectedProvenanceScores{
+			scores: proveTypeToScore{ProvenanceTypeConnection: 10005, ProvenanceTypeAuthentication: 15}}
 }
 
 func TestFullFlow(t *testing.T) {
@@ -1168,12 +1172,12 @@ func TestProvenanceSanity(t *testing.T) {
 	}
 
 	firstKey := records[0].Provenance[0].ToKey()
-	if firstKey == nil || *firstKey != b_tree.BTreeKeyType(expectedProvScores.scores[0]) {
+	if firstKey == nil || *firstKey != b_tree.BTreeKeyType(expectedProvScores.scores[ProvenanceTypeConnection]) {
 		t.Fail()
 	}
 
 	secondKey := records[0].Provenance[1].ToKey()
-	if secondKey == nil || int(*secondKey) != int(expectedProvScores.scores[1]) {
+	if secondKey == nil || int(*secondKey) != int(expectedProvScores.scores[ProvenanceTypeAuthentication]) {
 		t.Fail()
 	}
 }
@@ -1325,11 +1329,11 @@ func TestProvenanceIndexMultipleProvenancesInsert(t *testing.T) {
 		t.FailNow()
 	}
 
-	if pairs[0].Key != b_tree.BTreeKeyType(expectedProvScores.scores[0]) {
+	if pairs[0].Key != b_tree.BTreeKeyType(expectedProvScores.scores[ProvenanceTypeConnection]) {
 		t.Fail()
 	}
 
-	if pairs[1].Key != b_tree.BTreeKeyType(expectedProv2.scores[0]) {
+	if pairs[1].Key != b_tree.BTreeKeyType(expectedProv2.scores[ProvenanceTypeConnection]) {
 		t.Fail()
 	}
 }
@@ -1462,7 +1466,7 @@ func testGetIntFieldValue(field Field, t *testing.T) int {
 	return intField.Value
 }
 
-func testRecordProvenanceScoresByProvenanceType(record Record) map[ProvenanceType]ProvenanceScore {
+func testRecordProvenanceScoresByProvenanceType(record Record) proveTypeToScore {
 	provByType := make(map[ProvenanceType]ProvenanceScore)
 	for _, provFied := range record.Provenance {
 		provByType[provFied.Type] = provFied.Score()
@@ -1523,10 +1527,10 @@ func TestProvenanceAggregation(t *testing.T) {
 		t.FailNow()
 	}
 
-	firstProvExpectedConnectionScore := int(firstExpectedProv.scores[0])
-	secondProvExpectedConnectionScore := int(secondExpectedProv.scores[0])
-	firstProvExpectedAuthenticationScore := int(firstExpectedProv.scores[1])
-	secondProvExpectedAuthenticationScore := int(secondExpectedProv.scores[1])
+	firstProvExpectedConnectionScore := int(firstExpectedProv.scores[ProvenanceTypeConnection])
+	secondProvExpectedConnectionScore := int(secondExpectedProv.scores[ProvenanceTypeConnection])
+	firstProvExpectedAuthenticationScore := int(firstExpectedProv.scores[ProvenanceTypeAuthentication])
+	secondProvExpectedAuthenticationScore := int(secondExpectedProv.scores[ProvenanceTypeAuthentication])
 	for _, record := range records {
 		val := testGetIntFieldValue(record.Fields[0], t)
 		scoreByType := testRecordProvenanceScoresByProvenanceType(record)
@@ -1570,6 +1574,46 @@ func TestProvenanceAggregation(t *testing.T) {
 				firstProvExpectedConnectionScore*secondProvExpectedConnectionScore*2 {
 				t.Fail()
 			}
+		}
+	}
+}
+
+// Use a Cursor object to create a table and insert some records into it.
+// Then, using this same cursor, retrieve all of the table's contents and make sure each
+// record has the expected provenance.
+func TestCursorProvenanceSanity(t *testing.T) {
+	// initialize a DB that supports provenance
+	db, _ := initializeTestDbInternal(IN_MEMORY_BUFFER_PATH_MAGIC, true)
+
+	prov, expectedProvScores := dummyProvenance1()
+	conn, err := Connect(db.id.identifyingString, &prov.auth, &prov.conn)
+	if err != nil {
+		t.FailNow()
+	}
+
+	cursor := conn.OpenCursor()
+	cursor.Execute("create table newTable (columnA blob, columnB int)")
+	cursor.Execute("insert into newTable values (ab34ffffffff, 32), (0000, 55), (abcdef, 38)")
+	cursor.Execute("select columnA, columnB from newTable")
+	records := cursor.FetchAll()
+	if len(records) != 3 {
+		t.Fail()
+	}
+
+	for _, record := range records {
+		if len(record.Provenance) != 2 {
+			t.FailNow()
+		}
+
+		scores := testRecordProvenanceScoresByProvenanceType(record)
+
+		if scores[ProvenanceTypeConnection] !=
+			ProvenanceScore(expectedProvScores.scores[ProvenanceTypeConnection]) {
+			t.Fail()
+		}
+		if scores[ProvenanceTypeAuthentication] !=
+			ProvenanceScore(expectedProvScores.scores[ProvenanceTypeAuthentication]) {
+			t.Fail()
 		}
 	}
 }
