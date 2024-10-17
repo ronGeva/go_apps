@@ -50,10 +50,11 @@ func (r *listDbsRequest) handle() (*queryResult, error) {
 type queryDbsRequest struct {
 	db    string
 	query string
+	prov  clientProvenance
 }
 
 func (r *queryDbsRequest) handle() (*queryResult, error) {
-	conn, err := go_db.Connect(r.db)
+	conn, err := go_db.Connect(r.db, r.prov.auth, r.prov.conn)
 	if err != nil {
 		return nil, err
 	}
@@ -104,7 +105,7 @@ func createListDbsRequest(msg map[string]interface{}) (request, error) {
 	return &listDbsRequest{}, nil
 }
 
-func createQueryDbsRequest(msg map[string]interface{}) (request, error) {
+func createQueryDbsRequest(msg map[string]interface{}, prov clientProvenance) (request, error) {
 	db, err := getStringValue(msg, "db")
 	if err != nil {
 		return nil, err
@@ -117,10 +118,10 @@ func createQueryDbsRequest(msg map[string]interface{}) (request, error) {
 
 	log.Printf("db=%s, query=%s", *db, *query)
 
-	return &queryDbsRequest{query: *query, db: *db}, nil
+	return &queryDbsRequest{query: *query, db: *db, prov: prov}, nil
 }
 
-func parseRequest(msg map[string]interface{}) (request, error) {
+func parseRequest(msg map[string]interface{}, prov clientProvenance) (request, error) {
 	msgType, err := getStringValue(msg, "type")
 	if err != nil {
 		return nil, err
@@ -129,7 +130,7 @@ func parseRequest(msg map[string]interface{}) (request, error) {
 	case "create":
 		return createCreateDbRequest(msg)
 	case "query":
-		return createQueryDbsRequest(msg)
+		return createQueryDbsRequest(msg, prov)
 	case "queryDBs":
 		return createListDbsRequest(msg)
 	default:

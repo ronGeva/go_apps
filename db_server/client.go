@@ -1,10 +1,14 @@
 package main
 
 import (
+	"encoding/binary"
 	"encoding/json"
 	"log"
+	"net"
+	"strings"
 
 	"github.com/gorilla/websocket"
+	"github.com/ronGeva/go_apps/go_db"
 )
 
 type client struct {
@@ -16,6 +20,49 @@ type queryResponse struct {
 	Error   string
 	Type    string
 	Data    [][]string
+}
+
+type clientProvenance struct {
+	auth *go_db.ProvenanceAuthentication
+	conn *go_db.ProvenanceConnection
+}
+
+func parseAuthentication(msg map[string]interface{}) *go_db.ProvenanceAuthentication {
+	username := ""
+	password := ""
+
+	userValue, err := getStringValue(msg, "username")
+	if err == nil {
+		username = *userValue
+	}
+
+	passValue, err := getStringValue(msg, "password")
+	if err == nil {
+		password = *passValue
+	}
+
+	return &go_db.ProvenanceAuthentication{User: username, Password: password}
+}
+
+func (c *client) connectionProvenance() *go_db.ProvenanceConnection {
+	remote_address := c.conn.RemoteAddr().String()
+	addressParts := strings.Split(remote_address, ":")
+	if len(addressParts) != 2 {
+		return nil
+	}
+
+	ip := net.ParseIP(addressParts[0])
+	ipv4 := ip.To4()
+	if ipv4 == nil {
+		return nil
+	}
+
+	ipv4NumericVal := binary.BigEndian.Uint32(ipv4)
+	return &go_db.ProvenanceConnection{Ipv4: ipv4NumericVal}
+}
+
+func (c *client) provenance(msg map[string]interface{}) clientProvenance {
+	return clientProvenance{conn: c.connectionProvenance(), auth: parseAuthentication(msg)}
 }
 
 func (c *client) handleNewMessage() (*queryResult, error) {
@@ -34,7 +81,8 @@ func (c *client) handleNewMessage() (*queryResult, error) {
 		return nil, err
 	}
 
-	r, err := parseRequest(msg)
+	prov := c.provenance(msg)
+	r, err := parseRequest(msg, prov)
 	if err != nil {
 		return nil, err
 	}
@@ -53,6 +101,9 @@ func (c *client) sendResult(err error, res *queryResult) {
 			for _, record := range res.records {
 				recordStr := make([]string, 0)
 				for _, f := range record.Fields {
+					recordStr = append(recordStr, f.Stringify())
+				}
+				for _, f := range record.Provenance {
 					recordStr = append(recordStr, f.Stringify())
 				}
 				allRecordsStr = append(allRecordsStr, recordStr)

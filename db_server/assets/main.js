@@ -16,7 +16,9 @@ socket.onerror = error => {
 function SendQuery() {
     let dbName = document.getElementById("db").value;
     let query = document.getElementById("query").value;
-    let message = {"type": "query", "db": dbName, "query": query};
+    let username = document.getElementById("username").value;
+    let password = document.getElementById("password").value;
+    let message = {"type": "query", "db": dbName, "query": query, "username": username, "password": password};
     socket.send(JSON.stringify(message))
 }
 
