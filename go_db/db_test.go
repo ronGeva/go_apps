@@ -260,15 +260,15 @@ func testDefaultProvSettings() *ProvenanceSettings {
 }
 
 func dummyProvenance1() (OpenDBProvenance, testExpectedProvenanceScores) {
-	return OpenDBProvenance{auth: ProvenanceAuthentication{user: "ron", password: "1234"},
-			conn: ProvenanceConnection{ipv4: 1001}, settings: *testDefaultProvSettings()},
+	return OpenDBProvenance{auth: ProvenanceAuthentication{User: "ron", Password: "1234"},
+			conn: ProvenanceConnection{Ipv4: 1001}, settings: *testDefaultProvSettings()},
 		testExpectedProvenanceScores{
 			scores: proveTypeToScore{ProvenanceTypeConnection: 1001, ProvenanceTypeAuthentication: 4}}
 }
 
 func dummyProvenance2() (OpenDBProvenance, testExpectedProvenanceScores) {
-	return OpenDBProvenance{auth: ProvenanceAuthentication{user: "guy", password: "123456789abcdef"},
-			conn: ProvenanceConnection{ipv4: 10005}, settings: *testDefaultProvSettings()},
+	return OpenDBProvenance{auth: ProvenanceAuthentication{User: "guy", Password: "123456789abcdef"},
+			conn: ProvenanceConnection{Ipv4: 10005}, settings: *testDefaultProvSettings()},
 		testExpectedProvenanceScores{
 			scores: proveTypeToScore{ProvenanceTypeConnection: 10005, ProvenanceTypeAuthentication: 15}}
 }

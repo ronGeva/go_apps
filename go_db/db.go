@@ -186,8 +186,8 @@ func getOpenDB(db database, prov *OpenDBProvenance) (*openDB, error) {
 
 	// create the basic openDB object with empty authentication
 	openDb := openDB{db: db, f: f, header: header,
-		authentication: ProvenanceAuthentication{user: "", password: ""},
-		connection:     ProvenanceConnection{ipv4: 0}}
+		authentication: ProvenanceAuthentication{User: "", Password: ""},
+		connection:     ProvenanceConnection{Ipv4: 0}}
 	if prov != nil {
 		openDb.authentication = prov.auth
 		openDb.connection = prov.conn

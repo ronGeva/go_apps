@@ -95,19 +95,19 @@ func deserializeProvenanceAuthenticationField(data []byte) ProvenanceAuthenticat
 	i += 2
 
 	pass := string(data[i : i+int(passSize)])
-	return ProvenanceAuthentication{user: username, password: pass}
+	return ProvenanceAuthentication{User: username, Password: pass}
 }
 
 func serializeProvenanceConnectionField(connection ProvenanceConnection) []byte {
 	data := make([]byte, 4)
-	binary.LittleEndian.PutUint32(data[:4], connection.ipv4)
+	binary.LittleEndian.PutUint32(data[:4], connection.Ipv4)
 
 	return data
 }
 
 func serializeProvenanceAuthenticationField(auth ProvenanceAuthentication) []byte {
-	userLen := len([]byte(auth.user))
-	passLen := len([]byte(auth.password))
+	userLen := len([]byte(auth.User))
+	passLen := len([]byte(auth.Password))
 	totalSize := 2 + userLen + 2 + passLen
 	data := make([]byte, totalSize)
 
@@ -116,13 +116,13 @@ func serializeProvenanceAuthenticationField(auth ProvenanceAuthentication) []byt
 	binary.LittleEndian.PutUint16(data[i:i+2], uint16(userLen))
 	i += 2
 
-	copy(data[i:i+userLen], []byte(auth.user))
+	copy(data[i:i+userLen], []byte(auth.User))
 	i += userLen
 
 	binary.LittleEndian.PutUint16(data[i:i+2], uint16(passLen))
 	i += 2
 
-	copy(data[i:i+passLen], []byte(auth.password))
+	copy(data[i:i+passLen], []byte(auth.Password))
 	i += passLen
 
 	return data
@@ -135,7 +135,7 @@ func provenanceAuthenticationStringify(field Field) string {
 	}
 
 	authentication := deserializeProvenanceAuthenticationField(blobField.Data)
-	return fmt.Sprintf("username: %s", authentication.user)
+	return fmt.Sprintf("username: %s", authentication.User)
 }
 
 var PROVENANCE_TYPE_TO_STRINGIFY_FUNC = map[ProvenanceType]func(Field) string{
@@ -148,7 +148,7 @@ func deserializeConnectionProvenance(data []byte) ProvenanceConnection {
 
 	ipv4 := binary.LittleEndian.Uint32(data[:4])
 
-	return ProvenanceConnection{ipv4: ipv4}
+	return ProvenanceConnection{Ipv4: ipv4}
 }
 
 func provenanceConnectionScore(field Field) ProvenanceScore {
@@ -210,12 +210,12 @@ var PROVENANCE_TYPE_TO_DESERIALIZATION_FUNC = map[ProvenanceType]func([]byte) Pr
 var AMOUNT_OF_PROVENANCE_COLUMNS int = len(PROVENANCE_TYPE_TO_DESERIALIZATION_FUNC)
 
 type ProvenanceAuthentication struct {
-	user     string
-	password string
+	User     string
+	Password string
 }
 
 type ProvenanceConnection struct {
-	ipv4 uint32
+	Ipv4 uint32
 }
 
 type ProvenanceField struct {
