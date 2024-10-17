@@ -3,6 +3,7 @@ package go_db
 import (
 	"encoding/binary"
 	"fmt"
+	"strings"
 
 	"github.com/ronGeva/go_apps/b_tree"
 )
@@ -32,6 +33,11 @@ const (
 type ProvenanceSettings struct {
 	multiplicationAggregation ProvenanceAggreationId
 	additionAggregation       ProvenanceAggreationId
+}
+
+var PROVENANCE_OPERATOR_STRING = map[ProvenanceOperator]string{
+	ProvenanceOperatorMultiply: "*",
+	ProvenanceOperatorPlus:     "+",
 }
 
 func provenanceAggregationMinFunc(scores []ProvenanceScore) ProvenanceScore {
@@ -253,9 +259,18 @@ func (field ProvenanceField) serialize() []byte {
 }
 
 func (field ProvenanceField) Stringify() string {
-	assert(field.operator == ProvenanceOperatorNil, "complex provenances' stringify is not implemented")
+	if field.operator == ProvenanceOperatorNil {
+		return PROVENANCE_TYPE_TO_STRINGIFY_FUNC[field.Type](field.Value)
+	}
 
-	return PROVENANCE_TYPE_TO_STRINGIFY_FUNC[field.Type](field.Value)
+	operandsStrings := make([]string, 0)
+	for _, operand := range field.operands {
+		operandString := operand.Stringify()
+		operandString = "(" + operandString + ")"
+		operandsStrings = append(operandsStrings, operandString)
+	}
+
+	return strings.Join(operandsStrings, PROVENANCE_OPERATOR_STRING[field.operator])
 }
 
 func (field ProvenanceField) ToKey() *b_tree.BTreeKeyType {
