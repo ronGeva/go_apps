@@ -547,6 +547,17 @@ func TestCursorSelect3(t *testing.T) {
 		t.Fail()
 	}
 
+	if len(cursor.columnNames) != 2 {
+		t.FailNow()
+	}
+
+	if cursor.columnNames[0] != fmt.Sprintf("%s.%s", table1.name, table1.scheme.columns[0].columnName) {
+		t.Fail()
+	}
+
+	if cursor.columnNames[1] != fmt.Sprintf("%s.%s", table2.name, table2.scheme.columns[1].columnName) {
+		t.Fail()
+	}
 	// TODO: add tests validating the values of the joint table are correct
 }
 

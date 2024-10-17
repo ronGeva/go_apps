@@ -317,6 +317,17 @@ func (db *openDB) provenanceSchemeColumns() []columnHeader {
 	return cols
 }
 
+func (db *openDB) provenanceNames() []string {
+	provCols := db.provenanceSchemeColumns()
+	names := make([]string, 0)
+
+	for _, col := range provCols {
+		names = append(names, col.columnName)
+	}
+
+	return names
+}
+
 func generateOpenDBProvenance(db *openDB) []ProvenanceField {
 	provFields := make([]ProvenanceField, 0)
 	for _, column := range db.provenanceSchemeColumns() {

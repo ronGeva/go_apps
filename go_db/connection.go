@@ -9,8 +9,10 @@ type Connection struct {
 }
 
 type Cursor struct {
-	conn    *Connection
-	records []Record
+	conn            *Connection
+	records         []Record
+	columnNames     []string
+	provenanceNames []string
 }
 
 var QUERY_TYPE_TO_FUNC = map[queryType]func(*openDB, *Cursor, string) error{
@@ -58,6 +60,8 @@ func ExecuteSelectQuery(openDatabse *openDB, cursor *Cursor, sql string) error {
 	}
 
 	cursor.records = records
+	cursor.columnNames = query.columnNames
+	cursor.provenanceNames = openDatabse.provenanceNames()
 	return nil
 }
 
@@ -128,4 +132,8 @@ func (cursor *Cursor) Execute(sql string) error {
 
 func (cursor *Cursor) FetchAll() []Record {
 	return cursor.records
+}
+
+func (cursor *Cursor) ColumnNames() []string {
+	return append(cursor.columnNames, cursor.provenanceNames...)
 }

@@ -28,6 +28,8 @@ const (
 type stringSet map[string]interface{}
 
 type selectQuery struct {
+	columnNames []string
+
 	// The columns asked to retrieve, in the order they've been requested
 	columns []uint32
 	// The tables the query should be performed on
@@ -162,7 +164,7 @@ func tableIDFromQuery(words []string, wordBefore string) (string, error) {
 	return tableIDs[0], nil
 }
 
-func columnNamesFromQuery(words []string) (stringSet, error) {
+func columnNamesFromQuery(words []string) ([]string, error) {
 	if len(words) == 0 {
 		return nil, fmt.Errorf("cannot extract columns from empty query")
 	}
@@ -176,7 +178,7 @@ func columnNamesFromQuery(words []string) (stringSet, error) {
 	}
 
 	// Column names are between the 'select' and the 'from' clauses
-	columnNames := make(stringSet)
+	columnNames := make([]string, 0)
 	for i := 1; i < fromIndex; i++ {
 		// Column names should be separated by a comma (',')
 		if i < fromIndex-1 {
@@ -185,10 +187,18 @@ func columnNamesFromQuery(words []string) (stringSet, error) {
 			}
 			words[i] = words[i][:len(words[i])-1]
 		}
-		columnNames[words[i]] = nil
+		columnNames = append(columnNames, words[i])
 	}
 
 	return columnNames, nil
+}
+
+func stringListToSet(list []string) stringSet {
+	set := make(stringSet)
+	for _, name := range list {
+		set[name] = nil
+	}
+	return set
 }
 
 // the tablePrefix is the prefix we expect all columns to be preceded by, as in the syntax:
@@ -575,18 +585,15 @@ func selectQueryGetTableColumns(scheme tableScheme, tableID string, columnNamesT
 	return selectColumns, nameToIndex, nil
 }
 
-func selectQueryGetTablesColumns(db *openDB, words []string, tableIDs []string) (
+func selectQueryGetTablesColumns(db *openDB, columnNames []string, tableIDs []string) (
 	[]uint32, map[string]uint32, []columnHeader, error) {
 	selectColumns := make([]uint32, 0)
 	nameToIndex := make(map[string]uint32)
 	columnsScheme := make([]columnHeader, 0)
 
-	columnNames, err := columnNamesFromQuery(words)
-	if err != nil {
-		return nil, nil, nil, err
-	}
+	columnNamesSet := stringListToSet(columnNames)
 
-	columnNamesType, err := selectQueryColumnNamesType(columnNames)
+	columnNamesType, err := selectQueryColumnNamesType(columnNamesSet)
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -604,7 +611,7 @@ func selectQueryGetTablesColumns(db *openDB, words []string, tableIDs []string) 
 		tableHeaders := parseTableHeaders(db, *tablePointer)
 
 		newColumnIndexes, newNameToIndex, err :=
-			selectQueryGetTableColumns(tableHeaders.scheme, tableID, columnNamesType, columnNames)
+			selectQueryGetTableColumns(tableHeaders.scheme, tableID, columnNamesType, columnNamesSet)
 		if err != nil {
 			return nil, nil, nil, err
 		}
@@ -634,7 +641,12 @@ func parseSelectQuery(db *openDB, sql string) (*selectQuery, error) {
 		return nil, fmt.Errorf("invalid 'from' clause in sql statement %s", sql)
 	}
 
-	selectColumns, nameToIndex, columnsScheme, err := selectQueryGetTablesColumns(db, words, tableIDs)
+	columnNames, err := columnNamesFromQuery(words)
+	if err != nil {
+		return nil, err
+	}
+
+	selectColumns, nameToIndex, columnsScheme, err := selectQueryGetTablesColumns(db, columnNames, tableIDs)
 	if err != nil {
 		return nil, err
 	}
@@ -649,7 +661,8 @@ func parseSelectQuery(db *openDB, sql string) (*selectQuery, error) {
 		return nil, err
 	}
 
-	return &selectQuery{columns: selectColumns, tableIDs: tableIDs, condition: cond, orderBy: orderBy}, nil
+	return &selectQuery{columnNames: columnNames, columns: selectColumns, tableIDs: tableIDs,
+		condition: cond, orderBy: orderBy}, nil
 }
 
 func parseSingleValuesTuple(statement string, index *int) ([]string, error) {
