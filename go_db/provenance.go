@@ -3,6 +3,7 @@ package go_db
 import (
 	"encoding/binary"
 	"fmt"
+	"net"
 	"strings"
 
 	"github.com/ronGeva/go_apps/b_tree"
@@ -86,7 +87,8 @@ func provenanceConnectionStringify(field Field) string {
 		return "<faulty connection provenance>"
 	}
 
-	return blobField.Stringify()
+	ipv4 := net.IPv4(blobField.Data[3], blobField.Data[2], blobField.Data[1], blobField.Data[0])
+	return ipv4.String()
 }
 
 func deserializeProvenanceAuthenticationField(data []byte) ProvenanceAuthentication {
