@@ -20,6 +20,7 @@ type queryResponse struct {
 	Error   string
 	Type    string
 	Data    [][]string
+	Headers []string
 }
 
 type clientProvenance struct {
@@ -109,6 +110,7 @@ func (c *client) sendResult(err error, res *queryResult) {
 				allRecordsStr = append(allRecordsStr, recordStr)
 			}
 			result.Data = allRecordsStr
+			result.Headers = res.columnNames
 		}
 	} else {
 		result.Error = err.Error()

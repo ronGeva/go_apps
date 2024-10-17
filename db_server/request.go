@@ -15,8 +15,9 @@ import (
 const DB_DIRECTORY = "C:\\temp\\db_directory"
 
 type queryResult struct {
-	records    []go_db.Record
-	resultType string
+	records     []go_db.Record
+	columnNames []string
+	resultType  string
 }
 
 type request interface {
@@ -65,7 +66,8 @@ func (r *queryDbsRequest) handle() (*queryResult, error) {
 	}
 
 	records := cursor.FetchAll()
-	return &queryResult{records: records, resultType: "query"}, nil
+	columnNames := cursor.ColumnNames()
+	return &queryResult{records: records, resultType: "query", columnNames: columnNames}, nil
 }
 
 func getStringValue(msg map[string]interface{}, key string) (*string, error) {

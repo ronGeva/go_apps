@@ -33,9 +33,16 @@ function QueryExistingDBs() {
     socket.send(JSON.stringify(message))
 }
 
-function PrintResultsTable(data) {
+function PrintResultsTable(headers, data) {
     let table = document.getElementById("results_table")
     table.innerHTML = ""
+    let header_row = table.insertRow(-1)
+    header_row.style.fontWeight = "bold";
+    for(let j = 0; j < headers.length; j++) {
+        let cell = header_row.insertCell(-1)
+        cell.innerHTML = headers[j]
+    }
+
     for (let i = 0; i < data.length; i++) {
         let row = table.insertRow(-1)
         for(let j = 0; j < data[i].length; j++) {
@@ -59,7 +66,7 @@ function ShowDBs(DBList) {
 
 function HandleSuccessfulMessage(res) {
     if (res["Type"] == "query") {
-        PrintResultsTable(res["Data"])
+        PrintResultsTable(res["Headers"], res["Data"])
         return
     }
     if (res["Type"] == "DBs") {
