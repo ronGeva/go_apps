@@ -445,6 +445,23 @@ func TestParseSelectQuery3(t *testing.T) {
 	}
 }
 
+// verify SELECT on non-existent column results in a failure
+func TestParseSelectQueryNonExistentColumn(t *testing.T) {
+	db, _, _ := buildTable6()
+	defer closeOpenDB(db)
+
+	sql := "select blablabla from table1 join table2"
+	_, err := parseSelectQuery(db, sql)
+	if err == nil {
+		t.FailNow()
+	}
+
+	_, ok := err.(*nonExistentColumnError)
+	if !ok {
+		t.Fail()
+	}
+}
+
 func TestDivideStatementByParentheses(t *testing.T) {
 	sql := "((columnA = 5) and (columnB = 13)) or columnA = 15 and columnB = 37 or ((columnA = 7) and (not (columnB = 30)))"
 	indexes, err := divideStatementByParentheses(sql, 0, len(sql))
@@ -535,9 +552,11 @@ func TestCursorSelect3(t *testing.T) {
 	}
 	cursor := conn.OpenCursor()
 
-	query := fmt.Sprintf("Select %s.%s, %s.%s from %s join %s order by %s.%s", table1.name,
-		table1.scheme.columns[0].columnName, table2.name, table2.scheme.columns[1].columnName,
-		table1.name, table2.name, table1.name, table1.scheme.columns[0].columnName)
+	query := fmt.Sprintf("Select %s.%s, %s.%s from %s join %s order by %s.%s",
+		table2.name, table2.scheme.columns[1].columnName, // first column
+		table1.name, table1.scheme.columns[0].columnName, // second column
+		table1.name, table2.name, // tables
+		table1.name, table1.scheme.columns[0].columnName) // order by expression
 	err = cursor.Execute(query)
 	if err != nil {
 		t.Fail()
@@ -551,11 +570,11 @@ func TestCursorSelect3(t *testing.T) {
 		t.FailNow()
 	}
 
-	if cursor.columnNames[0] != fmt.Sprintf("%s.%s", table1.name, table1.scheme.columns[0].columnName) {
+	if cursor.columnNames[0] != fmt.Sprintf("%s.%s", table2.name, table2.scheme.columns[1].columnName) {
 		t.Fail()
 	}
 
-	if cursor.columnNames[1] != fmt.Sprintf("%s.%s", table2.name, table2.scheme.columns[1].columnName) {
+	if cursor.columnNames[1] != fmt.Sprintf("%s.%s", table1.name, table1.scheme.columns[0].columnName) {
 		t.Fail()
 	}
 	// TODO: add tests validating the values of the joint table are correct

@@ -6,6 +6,14 @@ import (
 	"strings"
 )
 
+type nonExistentColumnError struct {
+	Description string
+}
+
+func (e *nonExistentColumnError) Error() string {
+	return e.Description
+}
+
 type queryType int8
 
 const (
@@ -563,31 +571,24 @@ func tableColumnsInQuery(tableColumns []columnHeader, prependTableName bool, tab
 	return columnsInQuery
 }
 
-// retrieves the select columns of a specific table, as well as a mpping of <column name>:<column offset>.
+// retrieves a mpping of <column name>:<column offset>.
 // all the columns offsets retrieved are local in the table, and must be fixed in order to get the joint
 // table offset.
-func selectQueryGetTableColumns(scheme tableScheme, tableID string, columnNamesType columnNameType,
-	columnNames stringSet) ([]uint32, map[string]uint32, error) {
+func selectQueryGetColumnNameToIndex(scheme tableScheme, tableID string, columnNamesType columnNameType,
+	columnNames stringSet) (map[string]uint32, error) {
 	tableNamePrefix := ""
 	if columnNamesType == columnNamesTypeMultipleTables {
 		tableNamePrefix = tableID
 	}
 	nameToIndex := tableColumnNameToIndex(scheme, tableNamePrefix)
-
-	tableColumns := tableColumnsInQuery(scheme.columns,
-		columnNamesType == columnNamesTypeMultipleTables, tableID, columnNames)
-
-	selectColumns, err := columnNamesToColumnIndexes(scheme, nameToIndex, tableColumns)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	return selectColumns, nameToIndex, nil
+	return nameToIndex, nil
 }
 
-func selectQueryGetTablesColumns(db *openDB, columnNames []string, tableIDs []string) (
-	[]uint32, map[string]uint32, []columnHeader, error) {
-	selectColumns := make([]uint32, 0)
+// retrieves the columnName-to-index map of the joint table (where the index of each column is
+// its index in the joint table) and all the column headers (in the order in which they appear
+// in the joint table).
+func selectQueryGetTablesScheme(db *openDB, columnNames []string, tableIDs []string) (
+	map[string]uint32, []columnHeader, error) {
 	nameToIndex := make(map[string]uint32)
 	columnsScheme := make([]columnHeader, 0)
 
@@ -595,7 +596,7 @@ func selectQueryGetTablesColumns(db *openDB, columnNames []string, tableIDs []st
 
 	columnNamesType, err := selectQueryColumnNamesType(columnNamesSet)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, err
 	}
 
 	// this variable used to "advance" the column offsets according to the sum of
@@ -606,21 +607,15 @@ func selectQueryGetTablesColumns(db *openDB, columnNames []string, tableIDs []st
 	for _, tableID := range tableIDs {
 		tablePointer, err := findTable(db, tableID)
 		if err != nil {
-			return nil, nil, nil, err
+			return nil, nil, err
 		}
 		tableHeaders := parseTableHeaders(db, *tablePointer)
 
-		newColumnIndexes, newNameToIndex, err :=
-			selectQueryGetTableColumns(tableHeaders.scheme, tableID, columnNamesType, columnNamesSet)
+		newNameToIndex, err :=
+			selectQueryGetColumnNameToIndex(tableHeaders.scheme, tableID, columnNamesType, columnNamesSet)
 		if err != nil {
-			return nil, nil, nil, err
+			return nil, nil, err
 		}
-
-		// fix offsets in all "column offsets" variables
-		for j := 0; j < len(newColumnIndexes); j++ {
-			newColumnIndexes[j] += uint32(columnsOffset)
-		}
-		selectColumns = append(selectColumns, newColumnIndexes...)
 
 		for columnName := range newNameToIndex {
 			nameToIndex[columnName] = newNameToIndex[columnName] + uint32(columnsOffset)
@@ -631,7 +626,22 @@ func selectQueryGetTablesColumns(db *openDB, columnNames []string, tableIDs []st
 		columnsOffset += len(tableHeaders.scheme.columns)
 	}
 
-	return selectColumns, nameToIndex, columnsScheme, nil
+	return nameToIndex, columnsScheme, nil
+}
+
+func selectQueryResolveColumnOffsets(columnNames []string, nameToIndex map[string]uint32) ([]uint32, error) {
+	selectColumns := make([]uint32, 0)
+	for _, name := range columnNames {
+		offset, ok := nameToIndex[name]
+		if !ok {
+			return nil, &nonExistentColumnError{
+				Description: fmt.Sprintf("non-existent column name %s was supplied", name)}
+		}
+
+		selectColumns = append(selectColumns, offset)
+	}
+
+	return selectColumns, nil
 }
 
 func parseSelectQuery(db *openDB, sql string) (*selectQuery, error) {
@@ -646,7 +656,7 @@ func parseSelectQuery(db *openDB, sql string) (*selectQuery, error) {
 		return nil, err
 	}
 
-	selectColumns, nameToIndex, columnsScheme, err := selectQueryGetTablesColumns(db, columnNames, tableIDs)
+	nameToIndex, columnsScheme, err := selectQueryGetTablesScheme(db, columnNames, tableIDs)
 	if err != nil {
 		return nil, err
 	}
@@ -657,6 +667,11 @@ func parseSelectQuery(db *openDB, sql string) (*selectQuery, error) {
 	}
 
 	orderBy, err := parseOrderByStatement(sql, nameToIndex)
+	if err != nil {
+		return nil, err
+	}
+
+	selectColumns, err := selectQueryResolveColumnOffsets(columnNames, nameToIndex)
 	if err != nil {
 		return nil, err
 	}
