@@ -8,6 +8,7 @@ Currently supported SQL operations:
         <li> specific columns </li>
         <li> where clause </li>
         <li> order by </li>
+        <li> JOINs </li>
     </ul>
   <li>insert</li>
   <li>update</li>
@@ -21,12 +22,12 @@ Currently supported SQL operations:
 Using the framework is relatively simple - all you've got to do is open a connection to the database, create a cursor object, and use it to execute queries and fetch results:
 
  ```go
-conn, err := Connect(dbPath)
+conn, err := Connect(dbPath, nil, nil)
 if err != nil {
     return err
 }
 cursor := conn.OpenCursor()
-err = cursor.Execute("Select columnA, ColumnB from newTable where columnA = 5 order by columnA")
+err = cursor.Execute("Select table1.columnA, table2.ColumnB from table1 join table2 where table1.columnA = 5 order by table2.columnB")
 if err != nil {
     return err
 }
@@ -47,8 +48,6 @@ records := cursor.FetchAll()
 ## What's next ##
  Features I've yet to implement:
  * Concurrent access to the DB
- * Indexing
- * Support for join operations
  * Views
  * Robust UI
 
