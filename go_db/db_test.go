@@ -90,6 +90,18 @@ func addRecordTestTable2(db *openDB, tableName string, first int, second string,
 	return err == nil
 }
 
+func testTable3Scheme() tableScheme {
+	firstColumn := columnHeader{"aaa", FieldTypeInt, nil, dbPointer{0, 0}}
+	secondColumn := columnHeader{"bbb", FieldTypeInt, nil, dbPointer{0, 0}}
+	return makeTableScheme([]columnHeader{firstColumn, secondColumn})
+}
+
+func addRecordTestTable3(db *openDB, tableName string, first int, second int) bool {
+	newRecord := MakeRecord([]Field{&IntField{first}, &IntField{second}})
+	_, err := addRecordToTable(db, tableName, newRecord)
+	return err == nil
+}
+
 func buildEmptyTableWithDbPath1(dbPath string) (*openDB, string) {
 	db, table := initializeTestDB(dbPath)
 	openDb, err := getOpenDB(db, nil)
@@ -271,6 +283,13 @@ func dummyProvenance2() (OpenDBProvenance, testExpectedProvenanceScores) {
 			conn: ProvenanceConnection{Ipv4: 10005}, settings: *testDefaultProvSettings()},
 		testExpectedProvenanceScores{
 			scores: proveTypeToScore{ProvenanceTypeConnection: 10005, ProvenanceTypeAuthentication: 15}}
+}
+
+func dummyProvenance3() (OpenDBProvenance, testExpectedProvenanceScores) {
+	return OpenDBProvenance{auth: ProvenanceAuthentication{User: "aaaaab", Password: "aaaaaaaaaa"},
+			conn: ProvenanceConnection{Ipv4: 500}, settings: *testDefaultProvSettings()},
+		testExpectedProvenanceScores{
+			scores: proveTypeToScore{ProvenanceTypeConnection: 500, ProvenanceTypeAuthentication: 10}}
 }
 
 func TestFullFlow(t *testing.T) {
@@ -1646,4 +1665,127 @@ func TestCursorProvenanceSanity(t *testing.T) {
 			t.Fail()
 		}
 	}
+}
+
+func testProvenanceGetRecordsUsingProvIterator(t *testing.T, db *openDB, tables []string,
+	provType ProvenanceType) []jointRecord {
+	iterator, err := provenanceInitializeTableIterator(db, tables, provType)
+	if err != nil {
+		t.FailNow()
+	}
+
+	records := make([]jointRecord, 0)
+	record := iterator.next()
+	for record != nil {
+		records = append(records, *record)
+		record = iterator.next()
+	}
+
+	return records
+}
+
+func testProvenanceAssertRecordsAreInAscendingProvenanceOrder(t *testing.T, records []jointRecord,
+	provType ProvenanceType) {
+	// verify the records are ordered by provenance score (ascending order)
+	for i := 0; i < len(records)-1; i++ {
+		prevScore := testRecordProvenanceScoresByProvenanceType(records[i].record)[provType]
+		currentScore := testRecordProvenanceScoresByProvenanceType(records[i+1].record)[provType]
+
+		if prevScore > currentScore {
+			t.Fail()
+		}
+	}
+}
+
+func testProvenanceCheckProvenanceIteratorOnAllTypes(t *testing.T, db *openDB, tables []string,
+	expectedAmount uint32) {
+	for _, provField := range db.provFields {
+		provType := provField.Type
+		records := testProvenanceGetRecordsUsingProvIterator(t, db, tables, provType)
+		if len(records) != int(expectedAmount) {
+			t.Fail()
+		}
+
+		testProvenanceAssertRecordsAreInAscendingProvenanceOrder(t, records, provType)
+	}
+}
+
+// create 3 tables, add a few records in each of them, using 3 different provenances.
+// then, for each provenance type, create a provenance iterator and retrieve all records
+// using it.
+// verify the amount of records retrieved is as expected, and that their aggregated provenance
+// score is in ascending order (as expected).
+func TestProvIndexIterator(t *testing.T) {
+	prov1, _ := dummyProvenance1()
+	db, _ := initializeTestDbInternal(IN_MEMORY_BUFFER_PATH_MAGIC, true)
+
+	table1 := "table1"
+	table2 := "table2"
+	table3 := "table3"
+
+	scheme1 := testTable1Scheme()
+	scheme2 := testTable2Scheme()
+	scheme3 := testTable3Scheme()
+	openDb, err := getOpenDB(db, &prov1)
+	if err != nil {
+		t.FailNow()
+	}
+
+	scheme1.provColumns = openDb.provenanceSchemeColumns()
+	scheme2.provColumns = openDb.provenanceSchemeColumns()
+	scheme3.provColumns = openDb.provenanceSchemeColumns()
+	initializeIndexInColumn(openDb, scheme1.provColumns, 0)
+	initializeIndexInColumn(openDb, scheme1.provColumns, 1)
+	initializeIndexInColumn(openDb, scheme2.provColumns, 0)
+	initializeIndexInColumn(openDb, scheme2.provColumns, 1)
+	initializeIndexInColumn(openDb, scheme3.provColumns, 0)
+	initializeIndexInColumn(openDb, scheme3.provColumns, 1)
+	writeNewTable(openDb, table1, scheme1)
+	writeNewTable(openDb, table2, scheme2)
+	writeNewTable(openDb, table3, scheme3)
+
+	// under prov1
+	if !addRecordTestTable1(openDb, table1, 100, []byte{0, 1, 2}) {
+		t.FailNow()
+	}
+	if !addRecordTestTable2(openDb, table2, 12, "This is a string", 115000) {
+		t.FailNow()
+	}
+	if !addRecordTestTable3(openDb, table3, 555, 777) {
+		t.FailNow()
+	}
+
+	closeOpenDB(openDb)
+
+	prov2, _ := dummyProvenance2()
+	openDb, err = getOpenDB(db, &prov2)
+	if err != nil {
+		t.FailNow()
+	}
+	// under prov2
+	if !addRecordTestTable3(openDb, table3, 10000, 1000) {
+		t.FailNow()
+	}
+
+	closeOpenDB(openDb)
+
+	prov3, _ := dummyProvenance3()
+	openDb, err = getOpenDB(db, &prov3)
+	if err != nil {
+		t.FailNow()
+	}
+	// under prov3
+	if !addRecordTestTable1(openDb, table1, 1, []byte{100, 100, 100, 100}) {
+		t.FailNow()
+	}
+	if !addRecordTestTable2(openDb, table2, 13, "This is also a string", 115001) {
+		t.FailNow()
+	}
+	if !addRecordTestTable3(openDb, table3, 999, 111) {
+		t.FailNow()
+	}
+
+	testProvenanceCheckProvenanceIteratorOnAllTypes(t, openDb, []string{table2, table1, table3}, 12)
+	openDb.provSettings.multiplicationAggregation = ProvenanceAggregationMax
+	testProvenanceCheckProvenanceIteratorOnAllTypes(t, openDb, []string{table2, table1, table3}, 12)
 }

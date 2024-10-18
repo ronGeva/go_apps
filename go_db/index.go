@@ -172,3 +172,94 @@ func removeRecordFromIndexes(db *openDB, record *recordForChange, scheme *tableS
 
 	return removeRecordFromProvIndex(db, record, scheme)
 }
+
+type indexTableIterator struct {
+	db               *openDB
+	recordsPointer   dbPointer
+	sizeOfRecord     uint32
+	scheme           tableScheme
+	iterator         *b_tree.BTreeIterator
+	retrievedRecords []tableCurrentRecord
+}
+
+func (iterator *indexTableIterator) getRecord(offset uint32) Record {
+	recordData := readFromDbPointer(iterator.db, iterator.recordsPointer, iterator.sizeOfRecord,
+		iterator.sizeOfRecord*offset)
+	return deserializeRecord(iterator.db, recordData, iterator.scheme)
+}
+
+func (iterator *indexTableIterator) cacheNextKeyRecords() {
+	if len(iterator.retrievedRecords) > 0 {
+		return
+	}
+
+	pair := iterator.iterator.Next()
+	if pair == nil {
+		return
+	}
+
+	sameKeyTreePointer := bTreePointerToDbPointer(pair.Pointer)
+	tree, err := initializeExistingBTree(iterator.db, sameKeyTreePointer)
+	if err != nil {
+		return
+	}
+
+	currentKeyIterator := tree.Iterator()
+	pair = currentKeyIterator.Next()
+	for pair != nil {
+		offset := uint32(pair.Key)
+		record := iterator.getRecord(uint32(pair.Key))
+		iterator.retrievedRecords = append(iterator.retrievedRecords, tableCurrentRecord{record: record, offset: offset})
+
+		pair = currentKeyIterator.Next()
+	}
+}
+
+func (iterator *indexTableIterator) next() *tableCurrentRecord {
+	iterator.cacheNextKeyRecords()
+
+	if len(iterator.retrievedRecords) == 0 {
+		return nil
+	}
+
+	record := iterator.retrievedRecords[0]
+	iterator.retrievedRecords = iterator.retrievedRecords[1:]
+
+	return &record
+}
+
+func indexInitializeTableIterator(db *openDB, tableId string, columnOffset uint32, isProv bool) (*indexTableIterator, error) {
+	tablePointer, err := findTable(db, tableId)
+	if err != nil {
+		return nil, err
+	}
+	headers := parseTableHeaders(db, *tablePointer)
+	recordsPointer := headers.records
+	sizeOfRecord := int(DB_POINTER_SIZE) * headers.scheme.fieldsInRecord()
+
+	var index *b_tree.BTree = nil
+	if isProv {
+		if int(columnOffset) >= len(headers.scheme.provColumns) {
+			return nil, fmt.Errorf("no provenance column exists at index %d", columnOffset)
+		}
+		index = headers.scheme.provColumns[columnOffset].index
+	} else {
+		if int(columnOffset) >= len(headers.scheme.columns) {
+			return nil, fmt.Errorf("no column exists at index %d", columnOffset)
+		}
+		index = headers.scheme.columns[columnOffset].index
+	}
+
+	if index == nil {
+		return nil, fmt.Errorf("requested index was not found")
+	}
+
+	iterator := index.Iterator()
+	if iterator == nil {
+		return nil, fmt.Errorf("failed to initialize index iterator for table %s, isProv %t, column offset %d",
+			tableId, isProv, columnOffset)
+	}
+
+	return &indexTableIterator{db: db, sizeOfRecord: uint32(sizeOfRecord), scheme: headers.scheme,
+		recordsPointer: recordsPointer.pointer, iterator: iterator}, nil
+}
