@@ -193,10 +193,7 @@ func buildTable5() (*openDB, string) {
 
 	db, tableID := initializeTestDB(dbPath)
 
-	firstColumn := columnHeader{"IDColumn", FieldTypeInt, nil, dbPointer{0, 0}}
-	secondColumn := columnHeader{"NameColumn", FieldTypeString, nil, dbPointer{0, 0}}
-	thirdColumn := columnHeader{"intColumn2", FieldTypeInt, nil, dbPointer{0, 0}}
-	scheme := makeTableScheme([]columnHeader{firstColumn, secondColumn, thirdColumn})
+	scheme := testTable2Scheme()
 	openDatabase, err := getOpenDB(db, nil)
 	assert(err == nil, "failed opening DB in buildTable5")
 
@@ -1707,6 +1704,46 @@ func testProvenanceCheckProvenanceIteratorOnAllTypes(t *testing.T, db *openDB, t
 		}
 
 		testProvenanceAssertRecordsAreInAscendingProvenanceOrder(t, records, provType)
+	}
+}
+
+func TestIndexIterator(t *testing.T) {
+	db, table := buildTable5()
+
+	recordsInput := []Record{
+		{Fields: []Field{IntField{100}, StringField{"aa"}, IntField{5}}},
+		{Fields: []Field{IntField{102}, StringField{"aa"}, IntField{3}}},
+		{Fields: []Field{IntField{50}, StringField{"aa"}, IntField{1}}},
+		{Fields: []Field{IntField{12}, StringField{"aa"}, IntField{10}}},
+	}
+	for _, record := range recordsInput {
+		_, err := addRecordToTable(db, table, record)
+		if err != nil {
+			t.FailNow()
+		}
+	}
+
+	firstIterator, err := indexInitializeTableIterator(db, table, 0, false)
+	if err != nil {
+		t.FailNow()
+	}
+
+	records := make([]tableCurrentRecord, 0)
+	record := firstIterator.next()
+	for record != nil {
+		records = append(records, *record)
+		record = firstIterator.next()
+	}
+	if len(records) != len(records) {
+		t.Fail()
+	}
+	expectedOrder := []int{3, 2, 0, 1}
+	for i := 0; i < len(records); i++ {
+		expected := recordsInput[expectedOrder[i]]
+		actual := records[i].record
+		if !recordsAreEqual(actual, expected) {
+			t.Fail()
+		}
 	}
 }
 

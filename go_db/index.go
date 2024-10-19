@@ -180,12 +180,36 @@ type indexTableIterator struct {
 	scheme           tableScheme
 	iterator         *b_tree.BTreeIterator
 	retrievedRecords []tableCurrentRecord
+	isProv           bool
 }
 
 func (iterator *indexTableIterator) getRecord(offset uint32) Record {
 	recordData := readFromDbPointer(iterator.db, iterator.recordsPointer, iterator.sizeOfRecord,
 		iterator.sizeOfRecord*offset)
 	return deserializeRecord(iterator.db, recordData, iterator.scheme)
+}
+
+func (iterator *indexTableIterator) cacheNextRecordNonUniqueKey(pair *b_tree.BTreeKeyPointerPair) {
+	sameKeyTreePointer := bTreePointerToDbPointer(pair.Pointer)
+	tree, err := initializeExistingBTree(iterator.db, sameKeyTreePointer)
+	if err != nil {
+		return
+	}
+
+	currentKeyIterator := tree.Iterator()
+	pair = currentKeyIterator.Next()
+	for pair != nil {
+		offset := uint32(pair.Key)
+		record := iterator.getRecord(offset)
+		iterator.retrievedRecords = append(iterator.retrievedRecords, tableCurrentRecord{record: record, offset: offset})
+		pair = currentKeyIterator.Next()
+	}
+}
+
+func (iterator *indexTableIterator) cacheNextRecordUniqueKey(pair *b_tree.BTreeKeyPointerPair) {
+	offset := uint32(pair.Pointer)
+	record := iterator.getRecord(offset)
+	iterator.retrievedRecords = append(iterator.retrievedRecords, tableCurrentRecord{record: record, offset: offset})
 }
 
 func (iterator *indexTableIterator) cacheNextKeyRecords() {
@@ -198,20 +222,10 @@ func (iterator *indexTableIterator) cacheNextKeyRecords() {
 		return
 	}
 
-	sameKeyTreePointer := bTreePointerToDbPointer(pair.Pointer)
-	tree, err := initializeExistingBTree(iterator.db, sameKeyTreePointer)
-	if err != nil {
-		return
-	}
-
-	currentKeyIterator := tree.Iterator()
-	pair = currentKeyIterator.Next()
-	for pair != nil {
-		offset := uint32(pair.Key)
-		record := iterator.getRecord(uint32(pair.Key))
-		iterator.retrievedRecords = append(iterator.retrievedRecords, tableCurrentRecord{record: record, offset: offset})
-
-		pair = currentKeyIterator.Next()
+	if iterator.isProv {
+		iterator.cacheNextRecordNonUniqueKey(pair)
+	} else {
+		iterator.cacheNextRecordUniqueKey(pair)
 	}
 }
 
@@ -261,5 +275,5 @@ func indexInitializeTableIterator(db *openDB, tableId string, columnOffset uint3
 	}
 
 	return &indexTableIterator{db: db, sizeOfRecord: uint32(sizeOfRecord), scheme: headers.scheme,
-		recordsPointer: recordsPointer.pointer, iterator: iterator}, nil
+		recordsPointer: recordsPointer.pointer, iterator: iterator, isProv: isProv}, nil
 }
