@@ -23,11 +23,6 @@ type queryResponse struct {
 	Headers []string
 }
 
-type clientProvenance struct {
-	auth *go_db.ProvenanceAuthentication
-	conn *go_db.ProvenanceConnection
-}
-
 func parseAuthentication(msg map[string]interface{}) *go_db.ProvenanceAuthentication {
 	username := ""
 	password := ""
@@ -62,8 +57,14 @@ func (c *client) connectionProvenance() *go_db.ProvenanceConnection {
 	return &go_db.ProvenanceConnection{Ipv4: ipv4NumericVal}
 }
 
-func (c *client) provenance(msg map[string]interface{}) clientProvenance {
-	return clientProvenance{conn: c.connectionProvenance(), auth: parseAuthentication(msg)}
+func (c *client) provenance(msg map[string]interface{}) *go_db.DBProvenance {
+	conn := c.connectionProvenance()
+	auth := parseAuthentication(msg)
+	if conn == nil || auth == nil {
+		return nil
+	}
+
+	return &go_db.DBProvenance{Conn: *conn, Auth: *auth}
 }
 
 func (c *client) handleNewMessage() (*queryResult, error) {
