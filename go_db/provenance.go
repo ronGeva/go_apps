@@ -20,6 +20,11 @@ const (
 	ProvenanceTypeAuthentication
 )
 
+var PROVENANCE_ORDERED_TYPES []ProvenanceType = []ProvenanceType{
+	ProvenanceTypeConnection,
+	ProvenanceTypeAuthentication,
+}
+
 const (
 	ProvenanceOperatorNil ProvenanceOperator = iota
 	ProvenanceOperatorPlus
@@ -338,15 +343,22 @@ var PROV_COL_NAME_TO_FIELD_GENERATOR = map[string]func(db *openDB) ProvenanceFie
 	"__PROV_AUTHENTICATION__": provenanceGenerateAuthenticationField,
 }
 
+var PROVENANCE_TYPE_TO_NAME = map[ProvenanceType]string{
+	ProvenanceTypeConnection:     "__PROV_CONNECTION__",
+	ProvenanceTypeAuthentication: "__PROV_AUTHENTICATION__",
+}
+
 // returns the column headers of the configured provenance fields
 func (db *openDB) provenanceSchemeColumns() []columnHeader {
 	if !db.header.provenanceOn {
 		return make([]columnHeader, 0)
 	}
 
-	cols := []columnHeader{
-		{columnName: "__PROV_CONNECTION__", columnType: FieldTypeProvenance},
-		{columnName: "__PROV_AUTHENTICATION__", columnType: FieldTypeProvenance}}
+	cols := make([]columnHeader, 0)
+	for _, provType := range PROVENANCE_ORDERED_TYPES {
+		cols = append(cols,
+			columnHeader{columnName: PROVENANCE_TYPE_TO_NAME[provType], columnType: FieldTypeProvenance})
+	}
 
 	return cols
 }
@@ -396,7 +408,7 @@ func provenanceApplyOperatorToProvenanceList(provenances []ProvenanceField, oper
 	}
 
 	fields := make([]ProvenanceField, 0)
-	for provType := range provenanceByType {
+	for _, provType := range PROVENANCE_ORDERED_TYPES {
 		field := ProvenanceField{operator: operator, operands: provenanceByType[provType],
 			Type: provType, settings: provSettings}
 		fields = append(fields, field)
