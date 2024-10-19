@@ -2040,8 +2040,6 @@ func TestProvGetTopRecordManyRecords(t *testing.T) {
 	// verify the function always return records in ascending provenance order, regarding of the aggregation
 	// function used
 	for _, aggregationType := range aggregationTypes {
-		openDb.provSettings.multiplicationAggregation = aggregationType
-
 		provAggregation := PROVENANCE_AGGREGATION_FUNCS[aggregationType]
 		records, err := provenanceGetTopRecords(openDb, tableNames, provAggregation, 11, nil)
 		if err != nil {

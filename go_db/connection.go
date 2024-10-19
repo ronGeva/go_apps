@@ -53,7 +53,9 @@ func selectQueryRetrieveRecords(db *openDB, query *selectQuery) ([]Record, error
 		if !db.header.provenanceOn {
 			return nil, fmt.Errorf("'best' keyword requires provenance to be turned on for the database")
 		}
-		records, err := ProvenanceGetTopRecords(db, query.tableIDs, provenanceAggregationMinFunc,
+
+		aggregationFunc := provenanceMultiProvAggregation(db)
+		records, err := ProvenanceGetTopRecords(db, query.tableIDs, aggregationFunc,
 			*query.bestAmount, query.condition)
 		if err != nil {
 			return nil, err

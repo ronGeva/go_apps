@@ -36,11 +36,21 @@ const (
 type ProvenanceSettings struct {
 	multiplicationAggregation ProvenanceAggreationId
 	additionAggregation       ProvenanceAggreationId
+	multiProvAggregation      ProvenanceAggreationId
 }
+
+var DEFAULT_PROVENANCE_SETTINGS ProvenanceSettings = ProvenanceSettings{
+	multiplicationAggregation: ProvenanceAggregationMax,
+	additionAggregation:       ProvenanceAggregationMin,
+	multiProvAggregation:      ProvenanceAggregationAverage}
 
 var PROVENANCE_OPERATOR_STRING = map[ProvenanceOperator]string{
 	ProvenanceOperatorMultiply: "*",
 	ProvenanceOperatorPlus:     "+",
+}
+
+func provenanceMultiProvAggregation(db *openDB) ProvenanceAggregationFunc {
+	return PROVENANCE_AGGREGATION_FUNCS[db.provSettings.multiProvAggregation]
 }
 
 func provenanceAggregationMinFunc(scores []ProvenanceScore) ProvenanceScore {
@@ -367,10 +377,6 @@ type DBProvenance struct {
 	Conn     ProvenanceConnection
 	Settings *ProvenanceSettings
 }
-
-var DEFAULT_PROVENANCE_SETTINGS ProvenanceSettings = ProvenanceSettings{
-	multiplicationAggregation: ProvenanceAggregationMax,
-	additionAggregation:       ProvenanceAggregationMin}
 
 func provenanceApplyOperatorToProvenanceList(provenances []ProvenanceField, operator ProvenanceOperator) []ProvenanceField {
 	var provSettings *ProvenanceSettings = nil
