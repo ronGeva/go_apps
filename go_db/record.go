@@ -108,27 +108,6 @@ func recordsAreEqual(record1 Record, record2 Record) bool {
 	return true
 }
 
-func addRecordNoDuplications(uniqueRecords []Record, record Record) []Record {
-	for _, existingRecord := range uniqueRecords {
-		if recordsAreEqual(existingRecord, record) {
-			return uniqueRecords
-		}
-	}
-
-	return append(uniqueRecords, record)
-}
-
-func addRecordToIdenticalRecords(identicalRecords [][]Record, record Record) [][]Record {
-	for i := range identicalRecords {
-		if recordsAreEqual(record, identicalRecords[i][0]) {
-			identicalRecords[i] = append(identicalRecords[i], record)
-			return identicalRecords
-		}
-	}
-
-	return append(identicalRecords, []Record{record})
-}
-
 func uniqueRecordsFromIdenticalRecords(identicalRecords [][]Record) []Record {
 	uniqueRecords := make([]Record, 0)
 	for _, sameRecords := range identicalRecords {
@@ -139,12 +118,44 @@ func uniqueRecordsFromIdenticalRecords(identicalRecords [][]Record) []Record {
 	return uniqueRecords
 }
 
-// given a list of records, remove all duplications within it
-func removeRecordDuplications(records []Record) []Record {
-	identicalRecords := make([][]Record, 0)
-	for _, record := range records {
-		identicalRecords = addRecordToIdenticalRecords(identicalRecords, record)
+func addRecordToSameKeyRecords(record Record, sameKeyRecords [][]Record) [][]Record {
+	for i := range sameKeyRecords {
+		if recordsAreEqual(record, sameKeyRecords[i][0]) {
+			sameKeyRecords[i] = append(sameKeyRecords[i], record)
+			return sameKeyRecords
+		}
 	}
 
-	return uniqueRecordsFromIdenticalRecords(identicalRecords)
+	sameKeyRecords = append(sameKeyRecords, []Record{record})
+	return sameKeyRecords
+}
+
+func addRecordToSeenRecords(record Record, seenRecords map[string][][]Record, key string) {
+	val, ok := seenRecords[key]
+	if !ok {
+		seenRecords[key] = [][]Record{{record}}
+	} else {
+		seenRecords[key] = addRecordToSameKeyRecords(record, val)
+	}
+}
+
+func removeRecordDuplications(records []Record) []Record {
+	seenRecords := make(map[string][][]Record)
+	allUniqueRecords := make([]Record, 0)
+	for _, record := range records {
+		key := ""
+		for _, field := range record.Fields {
+			key += field.Stringify()
+		}
+
+		addRecordToSeenRecords(record, seenRecords, key)
+	}
+
+	for key := range seenRecords {
+		sameKeyRecords := seenRecords[key]
+		uniqueRecords := uniqueRecordsFromIdenticalRecords(sameKeyRecords)
+		allUniqueRecords = append(allUniqueRecords, uniqueRecords...)
+	}
+
+	return allUniqueRecords
 }
