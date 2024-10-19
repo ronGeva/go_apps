@@ -148,7 +148,7 @@ func removeRecordFromProvIndex(db *openDB, record *recordForChange, scheme *tabl
 		}
 
 		index := scheme.provColumns[i].index
-		key := record.partialRecord.Fields[keyIndex].ToKey()
+		key := record.partialRecord.Provenance[keyIndex].ToKey()
 		if key == nil {
 			return fmt.Errorf("failed to convert field to key value")
 		}
