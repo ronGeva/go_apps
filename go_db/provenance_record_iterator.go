@@ -382,8 +382,11 @@ func provenanceGetTopRecords(db *openDB, tables []string, aggregation Provenance
 	}
 
 	sort.Sort(&records)
-	bestRecords := make([]jointRecord, amount)
-	for i := 0; i < int(amount); i++ {
+
+	finalAmount := min(int(amount), len(records.records))
+
+	bestRecords := make([]jointRecord, finalAmount)
+	for i := 0; i < finalAmount; i++ {
 		bestRecords[i] = records.records[i].record
 	}
 
