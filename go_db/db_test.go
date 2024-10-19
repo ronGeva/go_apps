@@ -74,7 +74,7 @@ func testTable2Scheme() tableScheme {
 	return makeTableScheme([]columnHeader{firstColumn, secondColumn, thirdColumn})
 }
 
-func writeTestTable2(db *openDB, table string, index bool, prov *OpenDBProvenance) {
+func writeTestTable2(db *openDB, table string, index bool, prov *DBProvenance) {
 	scheme := testTable2Scheme()
 
 	if index {
@@ -251,7 +251,7 @@ func getConnectionTable2() (*testContext, error) {
 	db, tableID := buildTable2()
 	closeOpenDB(db)
 
-	conn, err := Connect(TEST_DB_PATH1, nil, nil)
+	conn, err := Connect(TEST_DB_PATH1, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -263,28 +263,23 @@ type testExpectedProvenanceScores struct {
 	scores proveTypeToScore
 }
 
-func testDefaultProvSettings() *ProvenanceSettings {
-	return &ProvenanceSettings{multiplicationAggregation: ProvenanceAggregationMin,
-		additionAggregation: ProvenanceAggregationMax}
-}
-
-func dummyProvenance1() (OpenDBProvenance, testExpectedProvenanceScores) {
-	return OpenDBProvenance{auth: ProvenanceAuthentication{User: "ron", Password: "1234"},
-			conn: ProvenanceConnection{Ipv4: 1001}, settings: *testDefaultProvSettings()},
+func dummyProvenance1() (DBProvenance, testExpectedProvenanceScores) {
+	return DBProvenance{Auth: ProvenanceAuthentication{User: "ron", Password: "1234"},
+			Conn: ProvenanceConnection{Ipv4: 1001}},
 		testExpectedProvenanceScores{
 			scores: proveTypeToScore{ProvenanceTypeConnection: 1001, ProvenanceTypeAuthentication: 4}}
 }
 
-func dummyProvenance2() (OpenDBProvenance, testExpectedProvenanceScores) {
-	return OpenDBProvenance{auth: ProvenanceAuthentication{User: "guy", Password: "123456789abcdef"},
-			conn: ProvenanceConnection{Ipv4: 10005}, settings: *testDefaultProvSettings()},
+func dummyProvenance2() (DBProvenance, testExpectedProvenanceScores) {
+	return DBProvenance{Auth: ProvenanceAuthentication{User: "guy", Password: "123456789abcdef"},
+			Conn: ProvenanceConnection{Ipv4: 10005}},
 		testExpectedProvenanceScores{
 			scores: proveTypeToScore{ProvenanceTypeConnection: 10005, ProvenanceTypeAuthentication: 15}}
 }
 
-func dummyProvenance3() (OpenDBProvenance, testExpectedProvenanceScores) {
-	return OpenDBProvenance{auth: ProvenanceAuthentication{User: "aaaaab", Password: "aaaaaaaaaa"},
-			conn: ProvenanceConnection{Ipv4: 500}, settings: *testDefaultProvSettings()},
+func dummyProvenance3() (DBProvenance, testExpectedProvenanceScores) {
+	return DBProvenance{Auth: ProvenanceAuthentication{User: "aaaaab", Password: "aaaaaaaaaa"},
+			Conn: ProvenanceConnection{Ipv4: 500}},
 		testExpectedProvenanceScores{
 			scores: proveTypeToScore{ProvenanceTypeConnection: 500, ProvenanceTypeAuthentication: 10}}
 }
@@ -515,7 +510,7 @@ func TestCursorSelect1(t *testing.T) {
 	closeOpenDB(db)
 
 	dbPath := db.db.id.identifyingString
-	conn, err := Connect(dbPath, nil, nil)
+	conn, err := Connect(dbPath, nil)
 	if err != nil {
 		t.Fail()
 	}
@@ -550,7 +545,7 @@ func TestCursorSelect2(t *testing.T) {
 	closeOpenDB(db)
 
 	dbPath := db.db.id.identifyingString
-	conn, err := Connect(dbPath, nil, nil)
+	conn, err := Connect(dbPath, nil)
 	if err != nil {
 		t.Fail()
 	}
@@ -578,7 +573,7 @@ func TestCursorSelect3(t *testing.T) {
 	closeOpenDB(db)
 
 	dbPath := db.db.id.identifyingString
-	conn, err := Connect(dbPath, nil, nil)
+	conn, err := Connect(dbPath, nil)
 	if err != nil {
 		t.Fail()
 	}
@@ -618,7 +613,7 @@ func TestCursorSelectWithBestKeyword(t *testing.T) {
 	bigProv, _ := dummyProvenance2()
 
 	dbPath := db.id.identifyingString
-	conn, err := Connect(dbPath, &bigProv.auth, &bigProv.conn)
+	conn, err := Connect(dbPath, &bigProv)
 	if err != nil {
 		t.Fail()
 	}
@@ -635,7 +630,7 @@ func TestCursorSelectWithBestKeyword(t *testing.T) {
 
 	// dummy provenance 1 has smaller score on all provenance fields
 	smallProv, _ := dummyProvenance1()
-	conn, err = Connect(dbPath, &smallProv.auth, &smallProv.conn)
+	conn, err = Connect(dbPath, &smallProv)
 	if err != nil {
 		t.FailNow()
 	}
@@ -670,7 +665,7 @@ func TestCursorInsert1(t *testing.T) {
 	closeOpenDB(db)
 
 	dbPath := db.db.id.identifyingString
-	conn, err := Connect(dbPath, nil, nil)
+	conn, err := Connect(dbPath, nil)
 	if err != nil {
 		t.Fail()
 	}
@@ -735,7 +730,7 @@ func TestCursorDelete1(t *testing.T) {
 
 func TestCursorCreateInsertSelect1(t *testing.T) {
 	db, _ := initializeTestDB1()
-	connection, err := Connect(db.id.identifyingString, nil, nil)
+	connection, err := Connect(db.id.identifyingString, nil)
 	if err != nil {
 		t.Fail()
 	}
@@ -753,7 +748,7 @@ func TestCursorCreateInsertSelect1(t *testing.T) {
 
 func TestCursorCreateInsertSelect2(t *testing.T) {
 	db, _ := initializeTestDB1()
-	connection, err := Connect(db.id.identifyingString, nil, nil)
+	connection, err := Connect(db.id.identifyingString, nil)
 	if err != nil {
 		t.Fail()
 	}
@@ -816,7 +811,7 @@ func CursorUpdateHelper(t *testing.T, db *openDB, tableID string, query string, 
 		t.Fail()
 	}
 
-	conn, err := Connect(dbPath, nil, nil)
+	conn, err := Connect(dbPath, nil)
 	if err != nil {
 		t.Fail()
 	}
@@ -1626,8 +1621,8 @@ func TestProvenanceAggregation(t *testing.T) {
 	}
 
 	// override the implemented aggregation funcs with a simple sum/multiplication aggregation funcs
-	PROVENANCE_AGGREGATION_FUNCS[ProvenanceAggregationMin] = testDummyProvenanceMultiplicationAggregationFunc
-	PROVENANCE_AGGREGATION_FUNCS[ProvenanceAggregationMax] = testDummyProvenanceAdditionAggregationFunc
+	PROVENANCE_AGGREGATION_FUNCS[ProvenanceAggregationMin] = testDummyProvenanceAdditionAggregationFunc
+	PROVENANCE_AGGREGATION_FUNCS[ProvenanceAggregationMax] = testDummyProvenanceMultiplicationAggregationFunc
 
 	// perform a JOIN between the two table and retrieve all the unique values of the first
 	// column in the first table
@@ -1700,7 +1695,7 @@ func TestCursorProvenanceSanity(t *testing.T) {
 	db, _ := initializeTestDbInternal(IN_MEMORY_BUFFER_PATH_MAGIC, true)
 
 	prov, expectedProvScores := dummyProvenance1()
-	conn, err := Connect(db.id.identifyingString, &prov.auth, &prov.conn)
+	conn, err := Connect(db.id.identifyingString, &prov)
 	if err != nil {
 		t.FailNow()
 	}
@@ -1952,12 +1947,12 @@ func testCreateTablesWithMultiProvenances1(t *testing.T) (database, map[string]*
 	return db, tables
 }
 
-func testProvRandomizeProvenance(prov *OpenDBProvenance) {
-	prov.auth.Password = testGenerateRandomStringField().Value
-	prov.auth.User = testGenerateRandomStringField().Value
+func testProvRandomizeProvenance(prov *DBProvenance) {
+	prov.Auth.Password = testGenerateRandomStringField().Value
+	prov.Auth.User = testGenerateRandomStringField().Value
 
 	// limit the score to 700
-	prov.conn.Ipv4 = uint32(testGenerateRandomIntField().Value) % 700
+	prov.Conn.Ipv4 = uint32(testGenerateRandomIntField().Value) % 700
 }
 
 // Create a DB with 3 tables, each with index enabled for all of its provenance fields.

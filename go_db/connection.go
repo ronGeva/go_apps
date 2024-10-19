@@ -7,8 +7,7 @@ import (
 
 type Connection struct {
 	db   database
-	auth *ProvenanceAuthentication
-	conn *ProvenanceConnection
+	prov *DBProvenance
 }
 
 type Cursor struct {
@@ -26,9 +25,10 @@ var QUERY_TYPE_TO_FUNC = map[queryType]func(*openDB, *Cursor, string) error{
 	QueryTypeUpdate: ExecuteUpdateQuery,
 }
 
-func Connect(path string, auth *ProvenanceAuthentication, conn *ProvenanceConnection) (Connection, error) {
+func Connect(path string, provenance *DBProvenance) (Connection, error) {
 	db := database{id: databaseUniqueID{ioType: LocalFile, identifyingString: path}}
-	return Connection{db: db, auth: auth, conn: conn}, nil
+
+	return Connection{db: db, prov: provenance}, nil
 }
 
 func (conn *Connection) OpenCursor() Cursor {
@@ -130,12 +130,7 @@ func (cursor *Cursor) Execute(sql string) error {
 		return nil
 	}
 
-	var prov *OpenDBProvenance = nil
-	if cursor.conn.auth != nil && cursor.conn.conn != nil {
-		prov = &OpenDBProvenance{auth: *cursor.conn.auth, conn: *cursor.conn.conn}
-	}
-
-	openDatabase, err := getOpenDB(cursor.conn.db, prov)
+	openDatabase, err := getOpenDB(cursor.conn.db, cursor.conn.prov)
 	if err != nil {
 		return err
 	}

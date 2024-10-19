@@ -362,11 +362,15 @@ func generateOpenDBProvenance(db *openDB) []ProvenanceField {
 	return provFields
 }
 
-type OpenDBProvenance struct {
-	auth     ProvenanceAuthentication
-	conn     ProvenanceConnection
-	settings ProvenanceSettings
+type DBProvenance struct {
+	Auth     ProvenanceAuthentication
+	Conn     ProvenanceConnection
+	Settings *ProvenanceSettings
 }
+
+var DEFAULT_PROVENANCE_SETTINGS ProvenanceSettings = ProvenanceSettings{
+	multiplicationAggregation: ProvenanceAggregationMax,
+	additionAggregation:       ProvenanceAggregationMin}
 
 func provenanceApplyOperatorToProvenanceList(provenances []ProvenanceField, operator ProvenanceOperator) []ProvenanceField {
 	var provSettings *ProvenanceSettings = nil

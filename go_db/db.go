@@ -172,7 +172,7 @@ func getIOInterface(dbPath string, mode int) IoInterface {
 	return f
 }
 
-func getOpenDB(db database, prov *OpenDBProvenance) (*openDB, error) {
+func getOpenDB(db database, prov *DBProvenance) (*openDB, error) {
 	f := getIOInterface(db.id.identifyingString, os.O_RDWR)
 
 	headerData := readFromFile(f, DB_HEADER_SIZE, 0)
@@ -189,9 +189,13 @@ func getOpenDB(db database, prov *OpenDBProvenance) (*openDB, error) {
 		authentication: ProvenanceAuthentication{User: "", Password: ""},
 		connection:     ProvenanceConnection{Ipv4: 0}}
 	if prov != nil {
-		openDb.authentication = prov.auth
-		openDb.connection = prov.conn
-		openDb.provSettings = prov.settings
+		openDb.authentication = prov.Auth
+		openDb.connection = prov.Conn
+		if prov.Settings != nil {
+			openDb.provSettings = *prov.Settings
+		} else {
+			openDb.provSettings = DEFAULT_PROVENANCE_SETTINGS
+		}
 		openDb.provFields = generateOpenDBProvenance(&openDb)
 	}
 
