@@ -193,6 +193,11 @@ func writeNewTable(openDatabase *openDB, tableID string, scheme tableScheme) err
 		scheme.provColumns = openDatabase.provenanceSchemeColumns()
 	}
 
+	// index all provenance columns
+	for i := 0; i < len(scheme.provColumns); i++ {
+		initializeIndexInColumn(openDatabase, scheme.provColumns, i)
+	}
+
 	newTablePointer := allocateNewDataBlock(openDatabase)
 	mutablePointer := addNewTableToTablesArray(openDatabase, newTablePointer)
 	initializeNewTableContent(openDatabase, tableID, scheme, &mutablePointer)

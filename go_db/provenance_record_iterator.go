@@ -268,6 +268,8 @@ type provenanceAggregatedTableIterator struct {
 	aggregation ProvenanceAggregationFunc
 
 	seenOnAllLists []jointRecord
+
+	conditions *conditionNode
 }
 
 // returns true if finished
@@ -281,6 +283,11 @@ func (iterator *provenanceAggregatedTableIterator) advance() bool {
 			// Therefore, if a single iterator returns nil, all should do the same from
 			// now on.
 			return true
+		}
+
+		// check if the record matches the condition
+		if iterator.conditions != nil && !checkAllConditions(*iterator.conditions, record.record) {
+			continue
 		}
 
 		recordStringKey := fmt.Sprint(record.offsets)
@@ -301,7 +308,8 @@ func (iterator *provenanceAggregatedTableIterator) advance() bool {
 	return false
 }
 
-func provenanceInitializeAggregatedTableIterator(db *openDB, tableIds []string, aggregation ProvenanceAggregationFunc) (
+func provenanceInitializeAggregatedTableIterator(db *openDB, tableIds []string,
+	aggregation ProvenanceAggregationFunc, conditions *conditionNode) (
 	*provenanceAggregatedTableIterator, error) {
 	provIterators := make([]provenanceTableIterator, 0)
 	for _, provField := range db.provFields {
@@ -317,7 +325,8 @@ func provenanceInitializeAggregatedTableIterator(db *openDB, tableIds []string, 
 			recordSeenCounter: make(map[string]uint32),
 			retrievedRecords:  make(map[string]jointRecord),
 			aggregation:       aggregation,
-			seenOnAllLists:    make([]jointRecord, 0)},
+			seenOnAllLists:    make([]jointRecord, 0),
+			conditions:        conditions},
 		nil
 }
 
@@ -346,9 +355,10 @@ func (records *provRankedRecords) Swap(i, j int) {
 	records.records[j] = temp
 }
 
-func provenanceGetTopRecords(db *openDB, tables []string, aggregation ProvenanceAggregationFunc, amount uint32) (
+func provenanceGetTopRecords(db *openDB, tables []string, aggregation ProvenanceAggregationFunc,
+	amount uint32, conditions *conditionNode) (
 	[]jointRecord, error) {
-	iterator, err := provenanceInitializeAggregatedTableIterator(db, tables, aggregation)
+	iterator, err := provenanceInitializeAggregatedTableIterator(db, tables, aggregation, conditions)
 	if err != nil {
 		return nil, err
 	}
@@ -378,4 +388,19 @@ func provenanceGetTopRecords(db *openDB, tables []string, aggregation Provenance
 	}
 
 	return bestRecords, nil
+}
+
+func ProvenanceGetTopRecords(db *openDB, tables []string, aggregation ProvenanceAggregationFunc,
+	amount uint32, conditions *conditionNode) ([]Record, error) {
+	records, err := provenanceGetTopRecords(db, tables, aggregation, amount, conditions)
+	if err != nil {
+		return nil, err
+	}
+
+	result := make([]Record, len(records))
+	for i := 0; i < len(records); i++ {
+		result[i] = records[i].record
+	}
+
+	return result, nil
 }

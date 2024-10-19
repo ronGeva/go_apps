@@ -478,6 +478,22 @@ func TestParseSelectQueryNonExistentColumn(t *testing.T) {
 	}
 }
 
+// verify SELECT with "best" keyword
+func TestParseSelectQueryBestKeyword(t *testing.T) {
+	db, _, _ := buildTable6()
+	defer closeOpenDB(db)
+
+	sql := "select table1.table1column1 from table1 join table2 order by table1.table1column1 best 10"
+	query, err := parseSelectQuery(db, sql)
+	if err != nil {
+		t.FailNow()
+	}
+
+	if query.bestAmount == nil || *query.bestAmount != 10 {
+		t.Fail()
+	}
+}
+
 func TestDivideStatementByParentheses(t *testing.T) {
 	sql := "((columnA = 5) and (columnB = 13)) or columnA = 15 and columnB = 37 or ((columnA = 7) and (not (columnB = 30)))"
 	indexes, err := divideStatementByParentheses(sql, 0, len(sql))
@@ -594,6 +610,59 @@ func TestCursorSelect3(t *testing.T) {
 		t.Fail()
 	}
 	// TODO: add tests validating the values of the joint table are correct
+}
+
+// test select execution with "best" keyword
+func TestCursorSelectWithBestKeyword(t *testing.T) {
+	db, _ := initializeTestDbInternal(IN_MEMORY_BUFFER_PATH_MAGIC, true)
+	bigProv, _ := dummyProvenance2()
+
+	dbPath := db.id.identifyingString
+	conn, err := Connect(dbPath, &bigProv.auth, &bigProv.conn)
+	if err != nil {
+		t.Fail()
+	}
+	cursor := conn.OpenCursor()
+
+	err = cursor.Execute("create table newTable (columnA int, columnB int)")
+	if err != nil {
+		t.FailNow()
+	}
+	err = cursor.Execute("insert into newTable values (13, 32), (41, 55), (37, 38)")
+	if err != nil {
+		t.FailNow()
+	}
+
+	// dummy provenance 1 has smaller score on all provenance fields
+	smallProv, _ := dummyProvenance1()
+	conn, err = Connect(dbPath, &smallProv.auth, &smallProv.conn)
+	if err != nil {
+		t.FailNow()
+	}
+
+	err = cursor.Execute("insert into newTable values (1, 2), (1000, 5000)")
+	if err != nil {
+		t.FailNow()
+	}
+
+	err = cursor.Execute("select columnA, columnB from newTable best 2")
+	if err != nil {
+		t.FailNow()
+	}
+
+	records := cursor.FetchAll()
+	if len(records) != 2 {
+		t.Fail()
+	}
+
+	// assert the retrieved records are exactly the records inserted under the second provenance,
+	// which has a smaller score
+	if !recordsAreEqual(records[0], Record{Fields: []Field{IntField{1}, IntField{2}}}) {
+		t.Fail()
+	}
+	if !recordsAreEqual(records[1], Record{Fields: []Field{IntField{1000}, IntField{5000}}}) {
+		t.Fail()
+	}
 }
 
 func TestCursorInsert1(t *testing.T) {
@@ -1339,7 +1408,6 @@ func TestProvenanceIndexMultipleProvenancesInsert(t *testing.T) {
 	}
 
 	scheme.provColumns = openDb.provenanceSchemeColumns()
-	initializeIndexInColumn(openDb, scheme.provColumns, 0)
 	writeNewTable(openDb, tableName, scheme)
 
 	if !addRecordTestTable2(openDb, tableName, 10111, "Aho Corasick", 1337) {
@@ -1828,12 +1896,6 @@ func testCreateMultiProvenanceDbScheme(t *testing.T) (database, map[string]*test
 	scheme1.provColumns = openDb.provenanceSchemeColumns()
 	scheme2.provColumns = openDb.provenanceSchemeColumns()
 	scheme3.provColumns = openDb.provenanceSchemeColumns()
-	initializeIndexInColumn(openDb, scheme1.provColumns, 0)
-	initializeIndexInColumn(openDb, scheme1.provColumns, 1)
-	initializeIndexInColumn(openDb, scheme2.provColumns, 0)
-	initializeIndexInColumn(openDb, scheme2.provColumns, 1)
-	initializeIndexInColumn(openDb, scheme3.provColumns, 0)
-	initializeIndexInColumn(openDb, scheme3.provColumns, 1)
 	writeNewTable(openDb, table1, scheme1)
 	writeNewTable(openDb, table2, scheme2)
 	writeNewTable(openDb, table3, scheme3)
@@ -1986,7 +2048,7 @@ func TestProvGetTopRecordManyRecords(t *testing.T) {
 		openDb.provSettings.multiplicationAggregation = aggregationType
 
 		provAggregation := PROVENANCE_AGGREGATION_FUNCS[aggregationType]
-		records, err := provenanceGetTopRecords(openDb, tableNames, provAggregation, 11)
+		records, err := provenanceGetTopRecords(openDb, tableNames, provAggregation, 11, nil)
 		if err != nil {
 			t.FailNow()
 		}

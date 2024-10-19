@@ -3,6 +3,7 @@ package go_db
 import (
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -47,6 +48,10 @@ type selectQuery struct {
 
 	// an optional uint32 that marks the column used to sort the result
 	orderBy *uint32
+
+	// An optional uint32 describing how many records we'd like to retrieve.
+	// The records received would be the one with the best provenance score.
+	bestAmount *uint32
 }
 
 type insertQuery struct {
@@ -462,6 +467,11 @@ func endOfWhereStatement(sql string) int {
 		return orderByIndex
 	}
 
+	bestIndex := strings.Index(sql, "best")
+	if bestIndex != -1 {
+		return bestIndex
+	}
+
 	// no successor was found, return the end of the query
 	return len(sql)
 }
@@ -505,7 +515,7 @@ func parseOrderByStatement(sql string, columnNameToIndex map[string]uint32) (*ui
 	// TODO: handle other statements after "order by"
 	orderByStatement := sql[orderByIndex+len("order by"):]
 	orderByWords := stringToWords(orderByStatement)
-	if len(orderByWords) != 1 {
+	if len(orderByWords) == 0 {
 		return nil, fmt.Errorf("invalid 'order by' statement %s", orderByStatement)
 	}
 
@@ -516,6 +526,29 @@ func parseOrderByStatement(sql string, columnNameToIndex map[string]uint32) (*ui
 	} else {
 		return nil, fmt.Errorf("invalid column name %s", columnName)
 	}
+}
+
+func parseBestStatement(sql string) (*uint32, error) {
+	bestIndex := strings.Index(sql, "best")
+	if bestIndex == -1 {
+		return nil, nil
+	}
+
+	bestStatement := sql[bestIndex+len("best"):]
+	bestWords := stringToWords(bestStatement)
+	if len(bestWords) != 1 {
+		return nil, fmt.Errorf("invalid 'best' statement %s", bestStatement)
+	}
+
+	amountString := bestWords[0]
+	amount, err := strconv.Atoi(amountString)
+	if err != nil {
+		return nil, fmt.Errorf("failed parsing best statement %s", bestStatement)
+	}
+
+	uintAmount := uint32(amount)
+
+	return &uintAmount, nil
 }
 
 // Retrieves the type of the column names used by the SELECT query.
@@ -671,13 +704,18 @@ func parseSelectQuery(db *openDB, sql string) (*selectQuery, error) {
 		return nil, err
 	}
 
+	bestAmount, err := parseBestStatement(sql)
+	if err != nil {
+		return nil, err
+	}
+
 	selectColumns, err := selectQueryResolveColumnOffsets(columnNames, nameToIndex)
 	if err != nil {
 		return nil, err
 	}
 
 	return &selectQuery{columnNames: columnNames, columns: selectColumns, tableIDs: tableIDs,
-		condition: cond, orderBy: orderBy}, nil
+		condition: cond, orderBy: orderBy, bestAmount: bestAmount}, nil
 }
 
 func parseSingleValuesTuple(statement string, index *int) ([]string, error) {

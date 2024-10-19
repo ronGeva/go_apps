@@ -1,6 +1,9 @@
 package go_db
 
-import "sort"
+import (
+	"fmt"
+	"sort"
+)
 
 type Connection struct {
 	db   database
@@ -45,12 +48,29 @@ func orderRecords(records []Record, pivot uint32) {
 	})
 }
 
+func selectQueryRetrieveRecords(db *openDB, query *selectQuery) ([]Record, error) {
+	if query.bestAmount != nil {
+		if !db.header.provenanceOn {
+			return nil, fmt.Errorf("'best' keyword requires provenance to be turned on for the database")
+		}
+		records, err := ProvenanceGetTopRecords(db, query.tableIDs, provenanceAggregationMinFunc,
+			*query.bestAmount, query.condition)
+		if err != nil {
+			return nil, err
+		}
+		return records, nil
+	} else {
+		return filterRecordsFromTables(db, query.tableIDs, query.condition, query.columns)
+	}
+}
+
 func ExecuteSelectQuery(openDatabse *openDB, cursor *Cursor, sql string) error {
 	query, err := parseSelectQuery(openDatabse, sql)
 	if err != nil {
 		return err
 	}
-	records, err := filterRecordsFromTables(openDatabse, query.tableIDs, query.condition, query.columns)
+
+	records, err := selectQueryRetrieveRecords(openDatabse, query)
 	if err != nil {
 		return err
 	}
