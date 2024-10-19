@@ -331,7 +331,7 @@ func provenanceInitializeAggregatedTableIterator(db *openDB, tableIds []string,
 }
 
 type provRankedRecord struct {
-	record jointRecord
+	record Record
 	score  ProvenanceScore
 }
 
@@ -357,7 +357,7 @@ func (records *provRankedRecords) Swap(i, j int) {
 
 func provenanceGetTopRecords(db *openDB, tables []string, aggregation ProvenanceAggregationFunc,
 	amount uint32, conditions *conditionNode) (
-	[]jointRecord, error) {
+	[]Record, error) {
 	iterator, err := provenanceInitializeAggregatedTableIterator(db, tables, aggregation, conditions)
 	if err != nil {
 		return nil, err
@@ -370,40 +370,30 @@ func provenanceGetTopRecords(db *openDB, tables []string, aggregation Provenance
 		}
 	}
 
-	records := provRankedRecords{records: make([]provRankedRecord, 0)}
+	records := make([]Record, 0)
 	for key := range iterator.retrievedRecords {
 		record := iterator.retrievedRecords[key]
+		records = append(records, record.record)
+	}
+
+	rankedRecords := provRankedRecords{records: make([]provRankedRecord, 0)}
+	for _, record := range records {
 		provScores := make([]ProvenanceScore, 0)
-		for _, provField := range record.record.Provenance {
+		for _, provField := range record.Provenance {
 			provScores = append(provScores, provField.Score())
 		}
 		aggregatedScore := aggregation(provScores)
-		records.records = append(records.records, provRankedRecord{record: record, score: aggregatedScore})
+		rankedRecords.records = append(rankedRecords.records, provRankedRecord{record: record, score: aggregatedScore})
 	}
 
-	sort.Sort(&records)
+	sort.Sort(&rankedRecords)
 
-	finalAmount := min(int(amount), len(records.records))
+	finalAmount := min(int(amount), len(rankedRecords.records))
 
-	bestRecords := make([]jointRecord, finalAmount)
+	bestRecords := make([]Record, finalAmount)
 	for i := 0; i < finalAmount; i++ {
-		bestRecords[i] = records.records[i].record
+		bestRecords[i] = rankedRecords.records[i].record
 	}
 
 	return bestRecords, nil
-}
-
-func ProvenanceGetTopRecords(db *openDB, tables []string, aggregation ProvenanceAggregationFunc,
-	amount uint32, conditions *conditionNode) ([]Record, error) {
-	records, err := provenanceGetTopRecords(db, tables, aggregation, amount, conditions)
-	if err != nil {
-		return nil, err
-	}
-
-	result := make([]Record, len(records))
-	for i := 0; i < len(records); i++ {
-		result[i] = records[i].record
-	}
-
-	return result, nil
 }

@@ -1728,16 +1728,16 @@ func TestCursorProvenanceSanity(t *testing.T) {
 }
 
 func testProvenanceGetRecordsUsingProvIterator(t *testing.T, db *openDB, tables []string,
-	provType ProvenanceType) []jointRecord {
+	provType ProvenanceType) []Record {
 	iterator, err := provenanceInitializeTableIterator(db, tables, provType)
 	if err != nil {
 		t.FailNow()
 	}
 
-	records := make([]jointRecord, 0)
+	records := make([]Record, 0)
 	record := iterator.next()
 	for record != nil {
-		records = append(records, *record)
+		records = append(records, record.record)
 		record = iterator.next()
 	}
 
@@ -1746,12 +1746,12 @@ func testProvenanceGetRecordsUsingProvIterator(t *testing.T, db *openDB, tables 
 
 type testRecordProvAggregationFunc func(Record) ProvenanceScore
 
-func testProvenanceAssertRecordsAreInAscendingProvenanceOrder(t *testing.T, records []jointRecord,
+func testProvenanceAssertRecordsAreInAscendingProvenanceOrder(t *testing.T, records []Record,
 	aggregation testRecordProvAggregationFunc) {
 	// verify the records are ordered by provenance score (ascending order)
 	for i := 0; i < len(records)-1; i++ {
-		prevScore := aggregation(records[i].record)
-		currentScore := aggregation(records[i+1].record)
+		prevScore := aggregation(records[i])
+		currentScore := aggregation(records[i+1])
 
 		if prevScore > currentScore {
 			t.Fail()

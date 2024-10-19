@@ -55,7 +55,7 @@ func selectQueryRetrieveRecords(db *openDB, query *selectQuery) ([]Record, error
 		}
 
 		aggregationFunc := provenanceMultiProvAggregation(db)
-		records, err := ProvenanceGetTopRecords(db, query.tableIDs, aggregationFunc,
+		records, err := provenanceGetTopRecords(db, query.tableIDs, aggregationFunc,
 			*query.bestAmount, query.condition)
 		if err != nil {
 			return nil, err
