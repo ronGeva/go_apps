@@ -2,6 +2,7 @@ package go_db
 
 import (
 	"fmt"
+	"sort"
 
 	"github.com/ronGeva/go_apps/b_tree"
 )
@@ -245,4 +246,136 @@ func provenanceInitializeTableIterator(db *openDB, tableIds []string, provType P
 	}
 
 	return &provIterator, nil
+}
+
+// Iterate over a joint table's record according to the aggregated score of
+// all the record's provenance fields.
+// This is done via Fagin's Rank Aggregation Algorithm.
+type provenanceAggregatedTableIterator struct {
+	// Maps a joint record unique ID with the amount of times it has been seen on
+	// different provenance lists.
+	// Once a record has been seen on all lists, we can assume it has a bigger aggregated
+	// score than all non-returned records and we can return it.
+	recordSeenCounter map[string]uint32
+
+	retrievedRecords map[string]jointRecord
+
+	// Iterators used to retrieve the next best joint record according to each provenance
+	// field.
+	iterators []provenanceTableIterator
+
+	// The function used to aggregate
+	aggregation ProvenanceAggregationFunc
+
+	seenOnAllLists []jointRecord
+}
+
+// returns true if finished
+func (iterator *provenanceAggregatedTableIterator) advance() bool {
+	for i := 0; i < len(iterator.iterators); i++ {
+		provIterator := &iterator.iterators[i]
+		record := provIterator.next()
+		if record == nil {
+			// All iterators should retrieve the same amount of records (since they're
+			// all pointing to the same joint table).
+			// Therefore, if a single iterator returns nil, all should do the same from
+			// now on.
+			return true
+		}
+
+		recordStringKey := fmt.Sprint(record.offsets)
+		val, ok := iterator.recordSeenCounter[recordStringKey]
+		if !ok {
+			val = 0
+			iterator.retrievedRecords[recordStringKey] = *record
+		}
+
+		val++
+		iterator.recordSeenCounter[recordStringKey] = val
+
+		if int(val) == len(iterator.iterators) {
+			iterator.seenOnAllLists = append(iterator.seenOnAllLists, *record)
+		}
+	}
+
+	return false
+}
+
+func provenanceInitializeAggregatedTableIterator(db *openDB, tableIds []string, aggregation ProvenanceAggregationFunc) (
+	*provenanceAggregatedTableIterator, error) {
+	provIterators := make([]provenanceTableIterator, 0)
+	for _, provField := range db.provFields {
+		provIterator, err := provenanceInitializeTableIterator(db, tableIds, provField.Type)
+		if err != nil {
+			return nil, err
+		}
+		provIterators = append(provIterators, *provIterator)
+	}
+
+	return &provenanceAggregatedTableIterator{
+			iterators:         provIterators,
+			recordSeenCounter: make(map[string]uint32),
+			retrievedRecords:  make(map[string]jointRecord),
+			aggregation:       aggregation,
+			seenOnAllLists:    make([]jointRecord, 0)},
+		nil
+}
+
+type provRankedRecord struct {
+	record jointRecord
+	score  ProvenanceScore
+}
+
+type provRankedRecords struct {
+	records []provRankedRecord
+}
+
+func (records *provRankedRecords) Len() int {
+	return len(records.records)
+}
+
+func (records *provRankedRecords) Less(i, j int) bool {
+	leftKey := records.records[i].score
+	rightKey := records.records[j].score
+	return leftKey < rightKey
+}
+
+func (records *provRankedRecords) Swap(i, j int) {
+	temp := records.records[i]
+	records.records[i] = records.records[j]
+	records.records[j] = temp
+}
+
+func provenanceGetTopRecords(db *openDB, tables []string, aggregation ProvenanceAggregationFunc, amount uint32) (
+	[]jointRecord, error) {
+	iterator, err := provenanceInitializeAggregatedTableIterator(db, tables, aggregation)
+	if err != nil {
+		return nil, err
+	}
+
+	for len(iterator.seenOnAllLists) < int(amount) {
+		if iterator.advance() {
+			// no more entries
+			break
+		}
+	}
+
+	records := provRankedRecords{records: make([]provRankedRecord, 0)}
+	for key := range iterator.retrievedRecords {
+		record := iterator.retrievedRecords[key]
+		provScores := make([]ProvenanceScore, 0)
+		for _, provField := range record.record.Provenance {
+			provScores = append(provScores, provField.Score())
+		}
+		aggregatedScore := aggregation(provScores)
+		records.records = append(records.records, provRankedRecord{record: record, score: aggregatedScore})
+	}
+
+	sort.Sort(&records)
+	bestRecords := make([]jointRecord, amount)
+	for i := 0; i < int(amount); i++ {
+		bestRecords[i] = records.records[i].record
+	}
+
+	return bestRecords, nil
 }

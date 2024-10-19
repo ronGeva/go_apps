@@ -1681,12 +1681,14 @@ func testProvenanceGetRecordsUsingProvIterator(t *testing.T, db *openDB, tables 
 	return records
 }
 
+type testRecordProvAggregationFunc func(Record) ProvenanceScore
+
 func testProvenanceAssertRecordsAreInAscendingProvenanceOrder(t *testing.T, records []jointRecord,
-	provType ProvenanceType) {
+	aggregation testRecordProvAggregationFunc) {
 	// verify the records are ordered by provenance score (ascending order)
 	for i := 0; i < len(records)-1; i++ {
-		prevScore := testRecordProvenanceScoresByProvenanceType(records[i].record)[provType]
-		currentScore := testRecordProvenanceScoresByProvenanceType(records[i+1].record)[provType]
+		prevScore := aggregation(records[i].record)
+		currentScore := aggregation(records[i+1].record)
 
 		if prevScore > currentScore {
 			t.Fail()
@@ -1703,7 +1705,11 @@ func testProvenanceCheckProvenanceIteratorOnAllTypes(t *testing.T, db *openDB, t
 			t.Fail()
 		}
 
-		testProvenanceAssertRecordsAreInAscendingProvenanceOrder(t, records, provType)
+		aggregation := func(record Record) ProvenanceScore {
+			return testRecordProvenanceScoresByProvenanceType(record)[provType]
+		}
+
+		testProvenanceAssertRecordsAreInAscendingProvenanceOrder(t, records, aggregation)
 	}
 }
 
@@ -1747,13 +1753,63 @@ func TestIndexIterator(t *testing.T) {
 	}
 }
 
-// create 3 tables, add a few records in each of them, using 3 different provenances.
-// then, for each provenance type, create a provenance iterator and retrieve all records
-// using it.
-// verify the amount of records retrieved is as expected, and that their aggregated provenance
-// score is in ascending order (as expected).
-func TestProvIndexIterator(t *testing.T) {
-	prov1, _ := dummyProvenance1()
+func testGenerateRandomBuffer() []byte {
+	bufferSize := rand.Intn(100) + 1 // always make it non-empty
+	randomBuffer := make([]byte, bufferSize)
+	// the documentation pretty much gurantees this function will always succeed, no need to check return value
+	rand.Read(randomBuffer)
+
+	return randomBuffer
+}
+
+func testGenerateRandomStringField() StringField {
+	randomBuffer := testGenerateRandomBuffer()
+	return StringField{string(randomBuffer)}
+}
+
+func testGenerateRandomBlobField() BlobField {
+	randomBuffer := testGenerateRandomBuffer()
+	return BlobField{randomBuffer}
+}
+
+func testGenerateRandomIntField() IntField {
+	integer := rand.Int31()
+	return IntField{int(integer)}
+}
+
+func testGenerateRandomRecord(scheme tableScheme) Record {
+	fields := make([]Field, 0)
+	for _, header := range scheme.columns {
+		if header.columnType == FieldTypeInt {
+			fields = append(fields, testGenerateRandomIntField())
+		}
+		if header.columnType == FieldTypeString {
+			fields = append(fields, testGenerateRandomStringField())
+		}
+		if header.columnType == FieldTypeBlob {
+			fields = append(fields, testGenerateRandomBlobField())
+		}
+	}
+	return Record{Fields: fields}
+}
+
+type testTableInfo struct {
+	records []Record
+	scheme  tableScheme
+}
+
+func testProvAddRecordToTable(t *testing.T, db *openDB, tables map[string]*testTableInfo, table string) {
+	record := testGenerateRandomRecord(tables[table].scheme)
+	_, err := addRecordToTable(db, table, record)
+	if err != nil {
+		t.FailNow()
+	}
+	record.Provenance = db.provFields
+	tables[table].records = append(tables[table].records, record)
+}
+
+func testCreateMultiProvenanceDbScheme(t *testing.T) (database, map[string]*testTableInfo) {
+	prov, _ := dummyProvenance1()
 	db, _ := initializeTestDbInternal(IN_MEMORY_BUFFER_PATH_MAGIC, true)
 
 	table1 := "table1"
@@ -1763,10 +1819,11 @@ func TestProvIndexIterator(t *testing.T) {
 	scheme1 := testTable1Scheme()
 	scheme2 := testTable2Scheme()
 	scheme3 := testTable3Scheme()
-	openDb, err := getOpenDB(db, &prov1)
+	openDb, err := getOpenDB(db, &prov)
 	if err != nil {
 		t.FailNow()
 	}
+	defer closeOpenDB(openDb)
 
 	scheme1.provColumns = openDb.provenanceSchemeColumns()
 	scheme2.provColumns = openDb.provenanceSchemeColumns()
@@ -1781,17 +1838,33 @@ func TestProvIndexIterator(t *testing.T) {
 	writeNewTable(openDb, table2, scheme2)
 	writeNewTable(openDb, table3, scheme3)
 
-	// under prov1
-	if !addRecordTestTable1(openDb, table1, 100, []byte{0, 1, 2}) {
-		t.FailNow()
+	tables := map[string]*testTableInfo{
+		table1: {records: make([]Record, 0), scheme: scheme1},
+		table2: {records: make([]Record, 0), scheme: scheme2},
+		table3: {records: make([]Record, 0), scheme: scheme3},
 	}
-	if !addRecordTestTable2(openDb, table2, 12, "This is a string", 115000) {
-		t.FailNow()
+
+	return db, tables
+}
+
+func testCreateTablesWithMultiProvenances1(t *testing.T) (database, map[string]*testTableInfo) {
+	db, tables := testCreateMultiProvenanceDbScheme(t)
+
+	tableNames := make([]string, 0)
+	for name := range tables {
+		tableNames = append(tableNames, name)
 	}
-	if !addRecordTestTable3(openDb, table3, 555, 777) {
+
+	prov1, _ := dummyProvenance1()
+	openDb, err := getOpenDB(db, &prov1)
+	if err != nil {
 		t.FailNow()
 	}
 
+	// under prov1
+	testProvAddRecordToTable(t, openDb, tables, tableNames[0])
+	testProvAddRecordToTable(t, openDb, tables, tableNames[1])
+	testProvAddRecordToTable(t, openDb, tables, tableNames[2])
 	closeOpenDB(openDb)
 
 	prov2, _ := dummyProvenance2()
@@ -1800,10 +1873,7 @@ func TestProvIndexIterator(t *testing.T) {
 		t.FailNow()
 	}
 	// under prov2
-	if !addRecordTestTable3(openDb, table3, 10000, 1000) {
-		t.FailNow()
-	}
-
+	testProvAddRecordToTable(t, openDb, tables, tableNames[1])
 	closeOpenDB(openDb)
 
 	prov3, _ := dummyProvenance3()
@@ -1811,18 +1881,129 @@ func TestProvIndexIterator(t *testing.T) {
 	if err != nil {
 		t.FailNow()
 	}
+	defer closeOpenDB(openDb)
 	// under prov3
-	if !addRecordTestTable1(openDb, table1, 1, []byte{100, 100, 100, 100}) {
-		t.FailNow()
+	testProvAddRecordToTable(t, openDb, tables, tableNames[0])
+	testProvAddRecordToTable(t, openDb, tables, tableNames[1])
+	testProvAddRecordToTable(t, openDb, tables, tableNames[2])
+
+	return db, tables
+}
+
+func testProvRandomizeProvenance(prov *OpenDBProvenance) {
+	prov.auth.Password = testGenerateRandomStringField().Value
+	prov.auth.User = testGenerateRandomStringField().Value
+
+	// limit the score to 700
+	prov.conn.Ipv4 = uint32(testGenerateRandomIntField().Value) % 700
+}
+
+// Create a DB with 3 tables, each with index enabled for all of its provenance fields.
+// We then add 900 records into the DB, evenly split between the 3 tables.
+// Each record is inserted using a different randomly generated provenance.
+// Note that the total amount of joint records in this DB (the result of performing a JOIN
+// on all 3 tables and retrieving all records) is 27 million records.
+func testCreateTablesWithMultiProvenances2(t *testing.T) (database, map[string]*testTableInfo) {
+	prov, _ := dummyProvenance1()
+	db, tables := testCreateMultiProvenanceDbScheme(t)
+
+	tableNames := make([]string, 0)
+	for name := range tables {
+		tableNames = append(tableNames, name)
 	}
-	if !addRecordTestTable2(openDb, table2, 13, "This is also a string", 115001) {
-		t.FailNow()
-	}
-	if !addRecordTestTable3(openDb, table3, 999, 111) {
+
+	openDb, err := getOpenDB(db, &prov)
+	if err != nil {
 		t.FailNow()
 	}
 
-	testProvenanceCheckProvenanceIteratorOnAllTypes(t, openDb, []string{table2, table1, table3}, 12)
+	for i := 0; i < 900; i++ {
+		testProvRandomizeProvenance(&prov)
+		closeOpenDB(openDb)
+		openDb, err = getOpenDB(db, &prov)
+		if err != nil {
+			t.FailNow()
+		}
+
+		// each iteration add a record into one of the tables in round-robin fashion
+		testProvAddRecordToTable(t, openDb, tables, tableNames[i%3])
+	}
+
+	closeOpenDB(openDb)
+	return db, tables
+}
+
+// create 3 tables, add a few records in each of them, using 3 different provenances.
+// then, for each provenance type, create a provenance iterator and retrieve all records
+// using it.
+// verify the amount of records retrieved is as expected, and that their aggregated provenance
+// score is in ascending order (as expected).
+func TestProvIndexIterator(t *testing.T) {
+	prov, _ := dummyProvenance1()
+	db, tables := testCreateTablesWithMultiProvenances1(t)
+	openDb, err := getOpenDB(db, &prov)
+	if err != nil {
+		t.FailNow()
+	}
+
+	tableNames := make([]string, 0)
+	expectedAmount := 1
+	for name := range tables {
+		tableNames = append(tableNames, name)
+		expectedAmount *= len(tables[name].records)
+	}
+
+	testProvenanceCheckProvenanceIteratorOnAllTypes(t, openDb, tableNames, uint32(expectedAmount))
 	openDb.provSettings.multiplicationAggregation = ProvenanceAggregationMax
-	testProvenanceCheckProvenanceIteratorOnAllTypes(t, openDb, []string{table2, table1, table3}, 12)
+	testProvenanceCheckProvenanceIteratorOnAllTypes(t, openDb, tableNames, uint32(expectedAmount))
+}
+
+func TestProvGetTopRecordManyRecords(t *testing.T) {
+	prov, _ := dummyProvenance1()
+	db, tables := testCreateTablesWithMultiProvenances2(t)
+	openDb, err := getOpenDB(db, &prov)
+	if err != nil {
+		t.FailNow()
+	}
+
+	tableNames := make([]string, 0)
+	expectedAmount := 1
+	for name := range tables {
+		tableNames = append(tableNames, name)
+		expectedAmount *= len(tables[name].records)
+	}
+
+	aggregationTypes := []ProvenanceAggreationId{
+		ProvenanceAggregationMultiplication,
+		ProvenanceAggregationMax,
+		ProvenanceAggregationMin,
+		ProvenanceAggregationAverage,
+	}
+
+	// verify the function always return records in ascending provenance order, regarding of the aggregation
+	// function used
+	for _, aggregationType := range aggregationTypes {
+		openDb.provSettings.multiplicationAggregation = aggregationType
+
+		provAggregation := PROVENANCE_AGGREGATION_FUNCS[aggregationType]
+		records, err := provenanceGetTopRecords(openDb, tableNames, provAggregation, 11)
+		if err != nil {
+			t.FailNow()
+		}
+
+		if len(records) != 11 {
+			t.Fail()
+		}
+
+		aggregation := func(record Record) ProvenanceScore {
+			scores := make([]ProvenanceScore, len(record.Provenance))
+			for i := 0; i < len(record.Provenance); i++ {
+				scores[i] = record.Provenance[i].Score()
+			}
+
+			return provAggregation(scores)
+		}
+		testProvenanceAssertRecordsAreInAscendingProvenanceOrder(t, records, aggregation)
+	}
+
 }

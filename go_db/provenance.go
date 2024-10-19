@@ -29,6 +29,8 @@ const (
 const (
 	ProvenanceAggregationMin ProvenanceAggreationId = iota
 	ProvenanceAggregationMax
+	ProvenanceAggregationAverage
+	ProvenanceAggregationMultiplication
 )
 
 type ProvenanceSettings struct {
@@ -61,9 +63,31 @@ func provenanceAggregationMaxFunc(scores []ProvenanceScore) ProvenanceScore {
 	return ProvenanceScore(maxProv)
 }
 
+func provenanceAggregationAverageFunc(scores []ProvenanceScore) ProvenanceScore {
+	provSum := ProvenanceScore(0)
+
+	for _, score := range scores {
+		provSum += score
+	}
+
+	return provSum / ProvenanceScore(len(scores))
+}
+
+func provenanceAggregationMultiplicationFunc(scores []ProvenanceScore) ProvenanceScore {
+	result := ProvenanceScore(1)
+
+	for _, score := range scores {
+		result *= score
+	}
+
+	return result
+}
+
 var PROVENANCE_AGGREGATION_FUNCS = map[ProvenanceAggreationId]ProvenanceAggregationFunc{
-	ProvenanceAggregationMin: provenanceAggregationMinFunc,
-	ProvenanceAggregationMax: provenanceAggregationMaxFunc,
+	ProvenanceAggregationMin:            provenanceAggregationMinFunc,
+	ProvenanceAggregationMax:            provenanceAggregationMaxFunc,
+	ProvenanceAggregationAverage:        provenanceAggregationAverageFunc,
+	ProvenanceAggregationMultiplication: provenanceAggregationMultiplicationFunc,
 }
 
 func provenanceOperatorAggregation(operator ProvenanceOperator, settings *ProvenanceSettings,
