@@ -267,21 +267,21 @@ func dummyProvenance1() (DBProvenance, testExpectedProvenanceScores) {
 	return DBProvenance{Auth: ProvenanceAuthentication{User: "ron", Password: "123456"},
 			Conn: ProvenanceConnection{Ipv4: 14 << 24}},
 		testExpectedProvenanceScores{
-			scores: proveTypeToScore{ProvenanceTypeConnection: 14, ProvenanceTypeAuthentication: (64 - 6) * 4}}
+			scores: proveTypeToScore{ProvenanceTypeConnection: 14, ProvenanceTypeAuthentication: (32 - 6) * 8}}
 }
 
 func dummyProvenance2() (DBProvenance, testExpectedProvenanceScores) {
 	return DBProvenance{Auth: ProvenanceAuthentication{User: "guy", Password: "1234"},
 			Conn: ProvenanceConnection{Ipv4: 18 << 24}},
 		testExpectedProvenanceScores{
-			scores: proveTypeToScore{ProvenanceTypeConnection: 18, ProvenanceTypeAuthentication: (64 - 4) * 4}}
+			scores: proveTypeToScore{ProvenanceTypeConnection: 18, ProvenanceTypeAuthentication: (32 - 4) * 8}}
 }
 
 func dummyProvenance3() (DBProvenance, testExpectedProvenanceScores) {
 	return DBProvenance{Auth: ProvenanceAuthentication{User: "aaaaab", Password: "aaaaa"},
 			Conn: ProvenanceConnection{Ipv4: 10 << 14}},
 		testExpectedProvenanceScores{
-			scores: proveTypeToScore{ProvenanceTypeConnection: 10, ProvenanceTypeAuthentication: (64 - 5) * 4}}
+			scores: proveTypeToScore{ProvenanceTypeConnection: 10, ProvenanceTypeAuthentication: (32 - 5) * 8}}
 }
 
 func TestFullFlow(t *testing.T) {
