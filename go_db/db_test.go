@@ -1594,16 +1594,6 @@ func testDummyProvenanceAdditionAggregationFunc(operands []ProvenanceScore) Prov
 	return ProvenanceScore(s)
 }
 
-func testDummyProvenanceMultiplicationAggregationFunc(operands []ProvenanceScore) ProvenanceScore {
-	// multiply the scores
-	s := 1
-	for _, op := range operands {
-		s *= int(op)
-	}
-
-	return ProvenanceScore(s)
-}
-
 // Adds records into a DB from multiple sources, causing the records to have different provenance
 // values.
 // Then retrieve records using both JOIN and SELECT to create a few different expressions from
@@ -1621,8 +1611,8 @@ func TestProvenanceAggregation(t *testing.T) {
 	}
 
 	// override the implemented aggregation funcs with a simple sum/multiplication aggregation funcs
-	PROVENANCE_AGGREGATION_FUNCS[ProvenanceAggregationMin] = testDummyProvenanceAdditionAggregationFunc
-	PROVENANCE_AGGREGATION_FUNCS[ProvenanceAggregationMax] = testDummyProvenanceMultiplicationAggregationFunc
+	openDb.provSettings.additionAggregation = testDummyProvenanceAdditionAggregationFunc
+	openDb.provSettings.multiplicationAggregation = ProvenanceAggregationMultiplication
 
 	// perform a JOIN between the two table and retrieve all the unique values of the first
 	// column in the first table
@@ -2030,18 +2020,17 @@ func TestProvGetTopRecordManyRecords(t *testing.T) {
 		expectedAmount *= len(tables[name].records)
 	}
 
-	aggregationTypes := []ProvenanceAggreationId{
-		ProvenanceAggregationMultiplication,
-		ProvenanceAggregationMax,
-		ProvenanceAggregationMin,
+	aggregationFuncs := []ProvenanceAggregationFunc{
 		ProvenanceAggregationAverage,
+		ProvenanceAggregationMin,
+		ProvenanceAggregationMax,
+		ProvenanceAggregationMultiplication,
 	}
 
 	// verify the function always return records in ascending provenance order, regarding of the aggregation
 	// function used
-	for _, aggregationType := range aggregationTypes {
-		provAggregation := PROVENANCE_AGGREGATION_FUNCS[aggregationType]
-		records, err := provenanceGetTopRecords(openDb, tableNames, provAggregation, 11, nil)
+	for _, aggregationFunc := range aggregationFuncs {
+		records, err := provenanceGetTopRecords(openDb, tableNames, aggregationFunc, 11, nil)
 		if err != nil {
 			t.FailNow()
 		}
@@ -2056,7 +2045,7 @@ func TestProvGetTopRecordManyRecords(t *testing.T) {
 				scores[i] = record.Provenance[i].Score()
 			}
 
-			return provAggregation(scores)
+			return aggregationFunc(scores)
 		}
 		testProvenanceAssertRecordsAreInAscendingProvenanceOrder(t, records, aggregation)
 	}

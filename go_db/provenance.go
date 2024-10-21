@@ -13,7 +13,6 @@ type ProvenanceType uint16
 type ProvenanceScore uint32
 type ProvenanceOperator uint8
 type ProvenanceAggregationFunc func([]ProvenanceScore) ProvenanceScore
-type ProvenanceAggreationId uint8
 
 const (
 	ProvenanceTypeConnection ProvenanceType = iota
@@ -31,17 +30,10 @@ const (
 	ProvenanceOperatorMultiply
 )
 
-const (
-	ProvenanceAggregationMin ProvenanceAggreationId = iota
-	ProvenanceAggregationMax
-	ProvenanceAggregationAverage
-	ProvenanceAggregationMultiplication
-)
-
 type ProvenanceSettings struct {
-	multiplicationAggregation ProvenanceAggreationId
-	additionAggregation       ProvenanceAggreationId
-	multiProvAggregation      ProvenanceAggreationId
+	multiplicationAggregation ProvenanceAggregationFunc
+	additionAggregation       ProvenanceAggregationFunc
+	multiProvAggregation      ProvenanceAggregationFunc
 }
 
 var DEFAULT_PROVENANCE_SETTINGS ProvenanceSettings = ProvenanceSettings{
@@ -54,11 +46,7 @@ var PROVENANCE_OPERATOR_STRING = map[ProvenanceOperator]string{
 	ProvenanceOperatorPlus:     "+",
 }
 
-func provenanceMultiProvAggregation(db *openDB) ProvenanceAggregationFunc {
-	return PROVENANCE_AGGREGATION_FUNCS[db.provSettings.multiProvAggregation]
-}
-
-func provenanceAggregationMinFunc(scores []ProvenanceScore) ProvenanceScore {
+func ProvenanceAggregationMin(scores []ProvenanceScore) ProvenanceScore {
 	minProv := 0xffffffff
 
 	for _, score := range scores {
@@ -68,7 +56,7 @@ func provenanceAggregationMinFunc(scores []ProvenanceScore) ProvenanceScore {
 	return ProvenanceScore(minProv)
 }
 
-func provenanceAggregationMaxFunc(scores []ProvenanceScore) ProvenanceScore {
+func ProvenanceAggregationMax(scores []ProvenanceScore) ProvenanceScore {
 	maxProv := 0
 
 	for _, score := range scores {
@@ -78,7 +66,7 @@ func provenanceAggregationMaxFunc(scores []ProvenanceScore) ProvenanceScore {
 	return ProvenanceScore(maxProv)
 }
 
-func provenanceAggregationAverageFunc(scores []ProvenanceScore) ProvenanceScore {
+func ProvenanceAggregationAverage(scores []ProvenanceScore) ProvenanceScore {
 	provSum := ProvenanceScore(0)
 
 	for _, score := range scores {
@@ -88,7 +76,7 @@ func provenanceAggregationAverageFunc(scores []ProvenanceScore) ProvenanceScore 
 	return provSum / ProvenanceScore(len(scores))
 }
 
-func provenanceAggregationMultiplicationFunc(scores []ProvenanceScore) ProvenanceScore {
+func ProvenanceAggregationMultiplication(scores []ProvenanceScore) ProvenanceScore {
 	result := ProvenanceScore(1)
 
 	for _, score := range scores {
@@ -98,26 +86,17 @@ func provenanceAggregationMultiplicationFunc(scores []ProvenanceScore) Provenanc
 	return result
 }
 
-var PROVENANCE_AGGREGATION_FUNCS = map[ProvenanceAggreationId]ProvenanceAggregationFunc{
-	ProvenanceAggregationMin:            provenanceAggregationMinFunc,
-	ProvenanceAggregationMax:            provenanceAggregationMaxFunc,
-	ProvenanceAggregationAverage:        provenanceAggregationAverageFunc,
-	ProvenanceAggregationMultiplication: provenanceAggregationMultiplicationFunc,
-}
-
 func provenanceOperatorAggregation(operator ProvenanceOperator, settings *ProvenanceSettings,
 	operandScores []ProvenanceScore) ProvenanceScore {
-	var aggregationId *ProvenanceAggreationId = nil
 	if operator == ProvenanceOperatorMultiply {
-		aggregationId = &settings.multiplicationAggregation
+		return settings.multiplicationAggregation(operandScores)
 	}
 	if operator == ProvenanceOperatorPlus {
-		aggregationId = &settings.additionAggregation
+		return settings.additionAggregation(operandScores)
 	}
 
-	assert(aggregationId != nil, "invalid provenance operator was passed")
-
-	return PROVENANCE_AGGREGATION_FUNCS[*aggregationId](operandScores)
+	assert(false, "invalid provenance operator was passed")
+	return 0
 }
 
 func provenanceConnectionStringify(field Field) string {
