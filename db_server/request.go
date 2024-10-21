@@ -6,13 +6,14 @@ import (
 	"log"
 	"os"
 	"path"
+	"path/filepath"
 	"strings"
 
 	"github.com/ronGeva/go_apps/go_db"
 )
 
 // TODO: make this configurable
-const DB_DIRECTORY = "C:\\temp\\db_directory"
+const DB_DIRECTORY = "db_directory"
 
 type queryResult struct {
 	records     []go_db.Record
@@ -36,8 +37,33 @@ func (r *createDbRequest) handle() (*queryResult, error) {
 type listDbsRequest struct {
 }
 
+func (r *listDbsRequest) getDBDirectory() (*string, error) {
+	exePath, err := os.Executable()
+	if err != nil {
+		return nil, fmt.Errorf("error getting executable path: %v", err)
+	}
+
+	dbDirectory := filepath.Join(filepath.Dir(exePath), DB_DIRECTORY)
+
+	_, err = os.Stat(dbDirectory)
+	if os.IsNotExist(err) {
+		err = os.Mkdir(dbDirectory, os.ModePerm)
+	}
+
+	if err != nil {
+		return nil, err
+	}
+
+	return &dbDirectory, nil
+}
+
 func (r *listDbsRequest) handle() (*queryResult, error) {
-	entries, err := os.ReadDir(DB_DIRECTORY)
+	dbDirectory, err := r.getDBDirectory()
+	if err != nil {
+		return nil, err
+	}
+
+	entries, err := os.ReadDir(*dbDirectory)
 	if err != nil {
 		return nil, err
 	}
