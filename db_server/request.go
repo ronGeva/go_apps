@@ -120,6 +120,14 @@ func createQueryDbsRequest(msg map[string]interface{}, prov *go_db.DBProvenance)
 
 	log.Printf("db=%s, query=%s", *db, *query)
 
+	sourceIP, err := getStringValue(msg, "source_ip")
+	if err == nil && len(*sourceIP) > 0 {
+		connProv := ipToProvenanceConnection(*sourceIP)
+		if connProv != nil {
+			prov.Conn = *connProv
+		}
+	}
+
 	return &queryDbsRequest{query: *query, db: *db, prov: prov}, nil
 }
 

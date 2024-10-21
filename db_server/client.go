@@ -40,14 +40,8 @@ func parseAuthentication(msg map[string]interface{}) *go_db.ProvenanceAuthentica
 	return &go_db.ProvenanceAuthentication{User: username, Password: password}
 }
 
-func (c *client) connectionProvenance() *go_db.ProvenanceConnection {
-	remote_address := c.conn.RemoteAddr().String()
-	addressParts := strings.Split(remote_address, ":")
-	if len(addressParts) != 2 {
-		return nil
-	}
-
-	ip := net.ParseIP(addressParts[0])
+func ipToProvenanceConnection(ipString string) *go_db.ProvenanceConnection {
+	ip := net.ParseIP(ipString)
 	ipv4 := ip.To4()
 	if ipv4 == nil {
 		return nil
@@ -55,6 +49,16 @@ func (c *client) connectionProvenance() *go_db.ProvenanceConnection {
 
 	ipv4NumericVal := binary.BigEndian.Uint32(ipv4)
 	return &go_db.ProvenanceConnection{Ipv4: ipv4NumericVal}
+}
+
+func (c *client) connectionProvenance() *go_db.ProvenanceConnection {
+	remote_address := c.conn.RemoteAddr().String()
+	addressParts := strings.Split(remote_address, ":")
+	if len(addressParts) != 2 {
+		return nil
+	}
+
+	return ipToProvenanceConnection(addressParts[0])
 }
 
 func (c *client) provenance(msg map[string]interface{}) *go_db.DBProvenance {

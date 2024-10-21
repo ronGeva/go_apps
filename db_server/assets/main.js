@@ -9,7 +9,9 @@ function SendQuery() {
     let query = document.getElementById("query").value;
     let username = document.getElementById("username").value;
     let password = document.getElementById("password").value;
-    let message = {"type": "query", "db": dbName, "query": query, "username": username, "password": password};
+    let source_ip = document.getElementById("source_ip").value;
+    let message = {"type": "query", "db": dbName, "query": query, "username": username,
+         "password": password, "source_ip": source_ip};
     socket.send(JSON.stringify(message))
 }
 
