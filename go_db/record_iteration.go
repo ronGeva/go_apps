@@ -160,6 +160,14 @@ func getPartialRecord(record *Record, offsets partialRecordOffsets) Record {
 	return partialRecord
 }
 
+func getPartialRecords(records []Record, offsets partialRecordOffsets) []Record {
+	partialRecords := make([]Record, len(records))
+	for i := 0; i < len(records); i++ {
+		partialRecords[i] = getPartialRecord(&records[i], offsets)
+	}
+	return partialRecords
+}
+
 func mapGetRecords(context recordContext, requestedColumns []uint32) Record {
 	record := context.record
 	if requestedColumns == nil {

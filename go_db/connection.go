@@ -60,7 +60,8 @@ func selectQueryRetrieveRecords(db *openDB, query *selectQuery) ([]Record, error
 		if err != nil {
 			return nil, err
 		}
-		return records, nil
+
+		return getPartialRecords(records, partialRecordOffsets{columns: query.columns}), nil
 	} else {
 		return filterRecordsFromTables(db, query.tableIDs, query.condition, query.columns)
 	}
