@@ -1,17 +1,8 @@
-let socket = new WebSocket("ws://127.0.0.1:5678/ws");
-console.log("Attempting Connection...");
+function logError(err) {
+    window.alert(err)
+}
 
-socket.onopen = () => {
-    console.log("Successfully Connected");
-};
-
-socket.onclose = event => {
-    console.log("Socket Closed Connection: ", event);
-};
-
-socket.onerror = error => {
-    console.log("Socket Error: ", error);
-};
+let socket = null
 
 function SendQuery() {
     let dbName = document.getElementById("db").value;
@@ -77,20 +68,47 @@ function HandleSuccessfulMessage(res) {
         // Do nothing
         return
     }
-    console.error("faulty message: ", res)
+    logError("faulty message: " + res)
 }
 
 function HandleMessage(msg) {
     let res = JSON.parse(msg.data);
     if ("Success" in res) {
       if (!res["Success"]) {
-        console.log(res["Error"])
+        logError(res["Error"])
       } else {
         HandleSuccessfulMessage(res)
       }
     }
 }
 
-socket.onmessage = msg => {
-    HandleMessage(msg)
+function setConnectionStatus(connection_status) {
+    connection_status_obj = document.getElementById("connection_status")
+    connection_status_obj.innerHTML = connection_status
 }
+
+function Connect() {
+    ip = document.getElementById("server_ip").value;
+    socket = new WebSocket("ws://" + ip + ":5678/ws");
+    console.log("attempting connection to " + ip)
+    setConnectionStatus("")
+
+    socket.onopen = () => {
+        console.log("Successfully Connected");
+        setConnectionStatus("connected to " + ip)
+    };
+
+    socket.onclose = event => {
+        console.log("Socket Closed Connection: ", event);
+    };
+
+    socket.onerror = error => {
+        logError("Socket Error: " + error)
+    };
+
+    socket.onmessage = msg => {
+        HandleMessage(msg)
+    }
+}
+
+Connect()

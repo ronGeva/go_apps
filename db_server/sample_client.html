@@ -10,10 +10,13 @@
     <link href="assets/bootstrap/css/bootstrap.min.css" rel="stylesheet">
     <link href="assets/main.css" rel="stylesheet">
     <script src="assets/bootstrap/js/bootstrap.bundle.min.js"></script>
-    <script src="assets/main.js"></script>
 
   <div class="bordered_div">
     <h3>Authentication</h3>
+    Server IP: <input type="text" id="server_ip" value="127.0.0.1">
+     <button onclick="Connect()">connect</button>
+      <div id="connection_status"></div>
+      <br/>
     username: <input type="text" id="username"> <br/>
     password: <input type="password" id="password"> <br/>
   </div>
@@ -39,5 +42,6 @@
       <button onclick="CreateTable()">create</button>
     </p>
   </div>
+  <script src="assets/main.js"></script>
   </body>
 </html>
