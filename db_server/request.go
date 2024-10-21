@@ -133,6 +133,27 @@ func createListDbsRequest(msg map[string]interface{}) (request, error) {
 	return &listDbsRequest{}, nil
 }
 
+func getAggregationFunc(msg map[string]interface{}) *go_db.ProvenanceAggregationFunc {
+	var aggregationNameToFunc = map[string]go_db.ProvenanceAggregationFunc{
+		"max":      go_db.ProvenanceAggregationMax,
+		"min":      go_db.ProvenanceAggregationMin,
+		"average":  go_db.ProvenanceAggregationAverage,
+		"multiply": go_db.ProvenanceAggregationMultiplication,
+	}
+
+	aggregationName, err := getStringValue(msg, "aggregation")
+	if err != nil {
+		return nil
+	}
+
+	aggregation, ok := aggregationNameToFunc[*aggregationName]
+	if !ok {
+		return nil
+	}
+
+	return &aggregation
+}
+
 func createQueryDbsRequest(msg map[string]interface{}, prov *go_db.DBProvenance) (request, error) {
 	db, err := getStringValue(msg, "db")
 	if err != nil {
@@ -152,6 +173,13 @@ func createQueryDbsRequest(msg map[string]interface{}, prov *go_db.DBProvenance)
 		if connProv != nil {
 			prov.Conn = *connProv
 		}
+	}
+
+	multiProvAggregation := getAggregationFunc(msg)
+	if multiProvAggregation != nil {
+		settings := go_db.DEFAULT_PROVENANCE_SETTINGS
+		settings.MultiProvAggregation = *multiProvAggregation
+		prov.Settings = &settings
 	}
 
 	return &queryDbsRequest{query: *query, db: *db, prov: prov}, nil

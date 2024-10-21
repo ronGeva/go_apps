@@ -12,7 +12,7 @@
     <script src="assets/bootstrap/js/bootstrap.bundle.min.js"></script>
 
   <div class="bordered_div">
-    <h3>Authentication</h3>
+    <h3>Connection Details</h3>
     Server IP: <input type="text" id="server_ip" value="127.0.0.1">
      <button onclick="Connect()">connect</button>
       <div id="connection_status"></div>
@@ -20,6 +20,13 @@
     fake source IP (default is real IP): <input type="text" id="source_ip"> <br/>
     username: <input type="text" id="username"> <br/>
     password: <input type="password" id="password"> <br/>
+    multiple provenance aggregation function:
+    <select id="multi_prov_aggregation">
+      <option value="average">average</option>
+      <option value="min">min</option>
+      <option value="max">max</option>
+      <option value="multiply">multiply</option>
+    </select>
   </div>
   <div class="bordered_div">
     <h3>Query an existing DB</h3>
