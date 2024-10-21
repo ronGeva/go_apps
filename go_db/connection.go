@@ -40,10 +40,11 @@ func orderRecords(records []Record, pivot uint32) {
 
 	// sorts in place
 	sort.Slice(records, func(i, j int) bool {
-		firstField := records[i].Fields[pivot]
 		otherValue := records[j].Fields[pivot].serialize()
+
+		cond := condition{leftOperand: operand{fieldIndex: &pivot}, rightOperand: operand{valueLiteral: otherValue}}
 		// TODO: handle errors
-		isLess, _ := checkLess(firstField, otherValue)
+		isLess, _ := checkLess(&records[i], cond)
 		return isLess
 	})
 }

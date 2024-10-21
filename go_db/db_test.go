@@ -305,13 +305,17 @@ func TestFullFlow(t *testing.T) {
 func TestConditions(t *testing.T) {
 	record := Record{[]Field{IntField{5}, IntField{7}, BlobField{[]byte{11, 13, 25}}}, nil}
 	node1 := conditionNode{}
-	node1.condition = &condition{0, ConditionTypeEqual, uint32ToBytes(5)}
+	node1FieldIndex := uint32(0)
+	node1.condition = &condition{leftOperand: operand{fieldIndex: &node1FieldIndex},
+		conditionType: ConditionTypeEqual, rightOperand: operand{valueLiteral: uint32ToBytes(5)}}
 	// Condition should succeed
 	if !checkAllConditions(node1, record) {
 		t.Fail()
 	}
 	node2 := conditionNode{}
-	node2.condition = &condition{1, ConditionTypeEqual, uint32ToBytes(6)}
+	node2FieldIndex := uint32(1)
+	node2.condition = &condition{leftOperand: operand{fieldIndex: &node2FieldIndex},
+		conditionType: ConditionTypeEqual, rightOperand: operand{valueLiteral: uint32ToBytes(6)}}
 	// Condition should fail
 	if checkAllConditions(node2, record) {
 		t.Fail()
@@ -324,7 +328,9 @@ func TestConditions(t *testing.T) {
 		t.Fail()
 	}
 	node4 := conditionNode{}
-	node4.condition = &condition{1, ConditionTypeGreater, uint32ToBytes(6)}
+	node4FieldIndex := uint32(1)
+	node4.condition = &condition{leftOperand: operand{fieldIndex: &node4FieldIndex},
+		conditionType: ConditionTypeGreater, rightOperand: operand{valueLiteral: uint32ToBytes(6)}}
 	if !checkAllConditions(node4, record) {
 		t.Fail()
 	}
@@ -337,14 +343,23 @@ func TestConditions(t *testing.T) {
 }
 
 func buildConditionTreeForTest() conditionNode {
-	node1 := conditionNode{condition: &condition{0, ConditionTypeEqual, uint32ToBytes(5)}}
-	node2 := conditionNode{condition: &condition{1, ConditionTypeEqual, uint32ToBytes(44)}}
+	node1FieldIndex := uint32(0)
+	node2FieldIndex := uint32(1)
+	node1 := conditionNode{condition: &condition{leftOperand: operand{fieldIndex: &node1FieldIndex},
+		conditionType: ConditionTypeEqual, rightOperand: operand{valueLiteral: uint32ToBytes(5)}}}
+	node2 := conditionNode{condition: &condition{leftOperand: operand{fieldIndex: &node2FieldIndex},
+		conditionType: ConditionTypeEqual, rightOperand: operand{valueLiteral: uint32ToBytes(44)}}}
 	return conditionNode{operator: ConditionOperatorAnd, operands: []*conditionNode{&node1, &node2}}
 }
 
 func buildConditionTreeForTestAbove500OrBelow100() conditionNode {
-	node1 := conditionNode{condition: &condition{0, ConditionTypeGreater, uint32ToBytes(500)}}
-	node2 := conditionNode{condition: &condition{1, ConditionTypeLess, uint32ToBytes(100)}}
+	node1FieldIndex := uint32(0)
+	node2FieldIndex := uint32(1)
+	node1 := conditionNode{condition: &condition{leftOperand: operand{fieldIndex: &node1FieldIndex},
+		conditionType: ConditionTypeGreater, rightOperand: operand{valueLiteral: uint32ToBytes(500)}}}
+	node2 := conditionNode{condition: &condition{leftOperand: operand{fieldIndex: &node2FieldIndex},
+		conditionType: ConditionTypeLess, rightOperand: operand{valueLiteral: uint32ToBytes(100)}}}
+
 	return conditionNode{operator: ConditionOperatorOr, operands: []*conditionNode{&node1, &node2}}
 }
 
@@ -374,7 +389,7 @@ func printConditionNode(node conditionNode, indent int) {
 		}
 	} else {
 		fmt.Println(indentString+"condition=",
-			node.condition.fieldIndex, node.condition.conditionType)
+			*node.condition.leftOperand.fieldIndex, node.condition.conditionType)
 	}
 }
 
@@ -1477,7 +1492,11 @@ func TestProvenanceSelect(t *testing.T) {
 	}
 
 	node1 := conditionNode{}
-	node1.condition = &condition{0, ConditionTypeEqual, uint32ToBytes(1111)}
+	node1FieldIndex := uint32(0)
+	node1.condition = &condition{
+		leftOperand:   operand{fieldIndex: &node1FieldIndex},
+		conditionType: ConditionTypeEqual,
+		rightOperand:  operand{valueLiteral: uint32ToBytes(1111)}}
 	records, err := filterRecordsFromTables(openDb, []string{firstTable}, nil, []uint32{0})
 	if err != nil {
 		t.FailNow()

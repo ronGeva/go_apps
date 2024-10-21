@@ -344,12 +344,13 @@ func deleteRecord(db *openDB, tableID string, recordIndex uint32) error {
 func validateConditions(columns []columnHeader, recordsCondition conditionNode) bool {
 	if recordsCondition.condition != nil {
 		cond := recordsCondition.condition
-		if int(cond.fieldIndex) >= len(columns) {
+		if cond.leftOperand.fieldIndex != nil && int(*cond.leftOperand.fieldIndex) >= len(columns) {
 			return false
 		}
-		if !isConditionSupported(columns, cond) {
+		if cond.rightOperand.fieldIndex != nil && int(*cond.rightOperand.fieldIndex) >= len(columns) {
 			return false
 		}
+
 		return true
 	} else {
 		result := true

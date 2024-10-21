@@ -23,10 +23,53 @@ const (
 	ConditionOperatorNot
 )
 
+type operand struct {
+	fieldIndex   *uint32
+	valueLiteral []byte
+}
+
+func (op *operand) getInt(record *Record) int {
+	if op.fieldIndex != nil {
+		field, ok := record.Fields[*op.fieldIndex].(IntField)
+		assert(ok, "Failed to downcast IntField")
+		return field.Value
+	} else {
+		return int(binary.LittleEndian.Uint32(op.valueLiteral))
+	}
+}
+
+func (op *operand) getString(record *Record) string {
+	if op.fieldIndex != nil {
+		field, ok := record.Fields[*op.fieldIndex].(StringField)
+		assert(ok, "Failed to downcast StringField")
+		return field.Value
+	} else {
+		return string(op.valueLiteral)
+	}
+}
+
+func (op *operand) getBlob(record *Record) []byte {
+	if op.fieldIndex != nil {
+		field, ok := record.Fields[*op.fieldIndex].(BlobField)
+		assert(ok, "Failed to downcast BlobField")
+		return field.Data
+	} else {
+		return op.valueLiteral
+	}
+}
+
 type condition struct {
-	fieldIndex     uint32
-	conditionType  conditionType
-	conditionValue []byte
+	leftOperand   operand
+	rightOperand  operand
+	conditionType conditionType
+}
+
+func (cond *condition) valuesType(record Record) FieldType {
+	if cond.leftOperand.fieldIndex != nil {
+		return record.Fields[*cond.leftOperand.fieldIndex].getType()
+	}
+
+	return record.Fields[*cond.rightOperand.fieldIndex].getType()
 }
 
 type conditionNode struct {
@@ -47,16 +90,16 @@ var OPEATOR_FUNCS = map[conditionOperator]func(values []bool) bool{
 	ConditionOperatorNot: notFunc,
 }
 
-var CONDITION_FUNCS = map[conditionType]func(f Field, data []byte) (bool, error){
+var CONDITION_FUNCS = map[conditionType]func(record *Record, cond condition) (bool, error){
 	ConditionTypeEqual:   checkEqual,
 	ConditionTypeLess:    checkLess,
 	ConditionTypeGreater: checkGreater,
 }
 
-func isConditionSupported(columns []columnHeader, cond *condition) bool {
-	supportedConditions := SUPPORTED_CONDITIONS[columns[cond.fieldIndex].columnType]
+func isConditionSupported(valuesType FieldType, condType conditionType) bool {
+	supportedConditions := SUPPORTED_CONDITIONS[valuesType]
 	for _, supportedCondition := range supportedConditions {
-		if supportedCondition == cond.conditionType {
+		if supportedCondition == condType {
 			return true
 		}
 	}
@@ -84,51 +127,41 @@ func notFunc(values []bool) bool {
 	return !values[0]
 }
 
-func checkEqual(f Field, data []byte) (bool, error) {
-	switch f.getType() {
+func checkEqual(record *Record, cond condition) (bool, error) {
+	switch cond.valuesType(*record) {
 	case FieldTypeInt:
-		intField, ok := f.(IntField)
-		assert(ok, "Failed to downcast IntField")
-		return intField.Value == int(binary.LittleEndian.Uint32(data)), nil
+		return cond.leftOperand.getInt(record) == cond.rightOperand.getInt(record), nil
 	case FieldTypeBlob:
-		blobField, ok := f.(BlobField)
-		assert(ok, "Failed to downcase BlobField")
-		return bytes.Equal(blobField.Data, data), nil
+		return bytes.Equal(cond.leftOperand.getBlob(record),
+			cond.rightOperand.getBlob(record)), nil
 	case FieldTypeString:
-		stringField, ok := f.(StringField)
-		assert(ok, "Failed to downcast StringField")
-		return stringField.Value == string(data), nil
+		return cond.leftOperand.getString(record) == cond.rightOperand.getString(record), nil
 	default:
 		return false, fmt.Errorf("illegal condition")
 	}
 }
 
-func checkLess(f Field, data []byte) (bool, error) {
-	switch f.getType() {
+func checkLess(record *Record, cond condition) (bool, error) {
+	switch cond.valuesType(*record) {
 	case FieldTypeInt:
-		intField, ok := f.(IntField)
-		assert(ok, "Failed to downcast IntField")
-		return intField.Value < int(binary.LittleEndian.Uint32(data)), nil
+		return cond.leftOperand.getInt(record) < cond.rightOperand.getInt(record), nil
 	default:
 		return false, fmt.Errorf("illegal condition")
 	}
 }
 
-func checkGreater(f Field, data []byte) (bool, error) {
-	switch f.getType() {
+func checkGreater(record *Record, cond condition) (bool, error) {
+	switch cond.valuesType(*record) {
 	case FieldTypeInt:
-		intField, ok := f.(IntField)
-		assert(ok, "Failed to downcast IntField")
-		return intField.Value > int(binary.LittleEndian.Uint32(data)), nil
+		return cond.leftOperand.getInt(record) > cond.rightOperand.getInt(record), nil
 	default:
 		return false, fmt.Errorf("illegal condition")
 	}
 }
 
 func checkCondition(c condition, record Record) bool {
-	field := record.Fields[c.fieldIndex]
 	conditionFunc := CONDITION_FUNCS[c.conditionType]
-	result, err := conditionFunc(field, c.conditionValue)
+	result, err := conditionFunc(&record, c)
 	check(err) // TODO: handle error
 	return result
 }

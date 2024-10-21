@@ -244,28 +244,63 @@ func columnNamesToColumnIndexes(scheme tableScheme, nameToIndex map[string]uint3
 	return columnIndexes, nil
 }
 
+func parseSingleOperand(operandString string, fieldType FieldType, index *uint32) (*operand, error) {
+	if index == nil {
+		parseFunc := FIELD_TYPE_QUERY_VALUE_PARSE[fieldType]
+		data, err := parseFunc(operandString)
+		if err != nil {
+			return nil, err
+		}
+
+		return &operand{valueLiteral: data}, nil
+	}
+
+	return &operand{fieldIndex: index}, nil
+}
+
 func parseSingleConditionInternal(condStrings conditionStrings, columnsScheme []columnHeader,
 	nameToIndex map[string]uint32) (*condition, error) {
-	// We currently assume the first operand always refer to a column name while the
-	// second operand always refer to a value
+	leftOperandIndex, leftOperandIsName := nameToIndex[condStrings.firstOperand]
+	rightOperandIndex, rightOperandIsName := nameToIndex[condStrings.secondOperand]
 
-	// TODO: handle column-column comparison, and conditions in which the value is on
-	// the left operand
-	index, exists := nameToIndex[condStrings.firstOperand]
-	if !exists {
-		return nil, fmt.Errorf("condition contains non-existing column %s", condStrings.firstOperand)
+	if !leftOperandIsName && !rightOperandIsName {
+		return nil, fmt.Errorf("does not support comparison between two literals: %s, %s",
+			condStrings.firstOperand, condStrings.secondOperand)
 	}
-	firstColumn := columnsScheme[index]
-	parseFunc := FIELD_TYPE_QUERY_VALUE_PARSE[firstColumn.columnType]
-	value, err := parseFunc(condStrings.secondOperand)
+
+	var valuesType FieldType
+	if leftOperandIsName {
+		valuesType = columnsScheme[leftOperandIndex].columnType
+	} else {
+		valuesType = columnsScheme[rightOperandIndex].columnType
+	}
+
+	var leftIndex *uint32 = nil
+	if leftOperandIsName {
+		leftIndex = &leftOperandIndex
+	}
+	leftOperand, err := parseSingleOperand(condStrings.firstOperand, valuesType, leftIndex)
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse compared value %s of column %s",
-			condStrings.secondOperand, condStrings.firstOperand)
+		return nil, err
 	}
-	cond := condition{fieldIndex: index,
-		conditionType:  CONDITION_OPERATORS[condStrings.operator],
-		conditionValue: value}
-	return &cond, nil
+
+	var rightIndex *uint32 = nil
+	if rightOperandIsName {
+		rightIndex = &rightOperandIndex
+	}
+	rightOperand, err := parseSingleOperand(condStrings.secondOperand, valuesType, rightIndex)
+	if err != nil {
+		return nil, err
+	}
+
+	condType := CONDITION_OPERATORS[condStrings.operator]
+
+	if !isConditionSupported(valuesType, condType) {
+		return nil, fmt.Errorf("condition type %d is not supported for values type %d", condType, valuesType)
+	}
+
+	return &condition{leftOperand: *leftOperand, rightOperand: *rightOperand,
+		conditionType: CONDITION_OPERATORS[condStrings.operator]}, nil
 }
 
 func findMatchingClosingParentheses(sql string, i int, end int) (int, uint32) {
