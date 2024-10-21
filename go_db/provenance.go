@@ -31,15 +31,15 @@ const (
 )
 
 type ProvenanceSettings struct {
-	multiplicationAggregation ProvenanceAggregationFunc
-	additionAggregation       ProvenanceAggregationFunc
-	multiProvAggregation      ProvenanceAggregationFunc
+	MultiplicationAggregation ProvenanceAggregationFunc
+	AdditionAggregation       ProvenanceAggregationFunc
+	MultiProvAggregation      ProvenanceAggregationFunc
 }
 
 var DEFAULT_PROVENANCE_SETTINGS ProvenanceSettings = ProvenanceSettings{
-	multiplicationAggregation: ProvenanceAggregationMax,
-	additionAggregation:       ProvenanceAggregationMin,
-	multiProvAggregation:      ProvenanceAggregationAverage}
+	MultiplicationAggregation: ProvenanceAggregationMax,
+	AdditionAggregation:       ProvenanceAggregationMin,
+	MultiProvAggregation:      ProvenanceAggregationAverage}
 
 var PROVENANCE_OPERATOR_STRING = map[ProvenanceOperator]string{
 	ProvenanceOperatorMultiply: "*",
@@ -89,10 +89,10 @@ func ProvenanceAggregationMultiplication(scores []ProvenanceScore) ProvenanceSco
 func provenanceOperatorAggregation(operator ProvenanceOperator, settings *ProvenanceSettings,
 	operandScores []ProvenanceScore) ProvenanceScore {
 	if operator == ProvenanceOperatorMultiply {
-		return settings.multiplicationAggregation(operandScores)
+		return settings.MultiplicationAggregation(operandScores)
 	}
 	if operator == ProvenanceOperatorPlus {
-		return settings.additionAggregation(operandScores)
+		return settings.AdditionAggregation(operandScores)
 	}
 
 	assert(false, "invalid provenance operator was passed")

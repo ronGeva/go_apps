@@ -1630,8 +1630,8 @@ func TestProvenanceAggregation(t *testing.T) {
 	}
 
 	// override the implemented aggregation funcs with a simple sum/multiplication aggregation funcs
-	openDb.provSettings.additionAggregation = testDummyProvenanceAdditionAggregationFunc
-	openDb.provSettings.multiplicationAggregation = ProvenanceAggregationMultiplication
+	openDb.provSettings.AdditionAggregation = testDummyProvenanceAdditionAggregationFunc
+	openDb.provSettings.MultiplicationAggregation = ProvenanceAggregationMultiplication
 
 	// perform a JOIN between the two table and retrieve all the unique values of the first
 	// column in the first table
@@ -2020,7 +2020,7 @@ func TestProvIndexIterator(t *testing.T) {
 	}
 
 	testProvenanceCheckProvenanceIteratorOnAllTypes(t, openDb, tableNames, uint32(expectedAmount))
-	openDb.provSettings.multiplicationAggregation = ProvenanceAggregationMax
+	openDb.provSettings.MultiplicationAggregation = ProvenanceAggregationMax
 	testProvenanceCheckProvenanceIteratorOnAllTypes(t, openDb, tableNames, uint32(expectedAmount))
 }
 
