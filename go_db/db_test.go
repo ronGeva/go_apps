@@ -264,24 +264,24 @@ type testExpectedProvenanceScores struct {
 }
 
 func dummyProvenance1() (DBProvenance, testExpectedProvenanceScores) {
-	return DBProvenance{Auth: ProvenanceAuthentication{User: "ron", Password: "1234"},
-			Conn: ProvenanceConnection{Ipv4: 1001}},
+	return DBProvenance{Auth: ProvenanceAuthentication{User: "ron", Password: "123456"},
+			Conn: ProvenanceConnection{Ipv4: 14 << 24}},
 		testExpectedProvenanceScores{
-			scores: proveTypeToScore{ProvenanceTypeConnection: 1001, ProvenanceTypeAuthentication: 4}}
+			scores: proveTypeToScore{ProvenanceTypeConnection: 14, ProvenanceTypeAuthentication: (64 - 6) * 4}}
 }
 
 func dummyProvenance2() (DBProvenance, testExpectedProvenanceScores) {
-	return DBProvenance{Auth: ProvenanceAuthentication{User: "guy", Password: "123456789abcdef"},
-			Conn: ProvenanceConnection{Ipv4: 10005}},
+	return DBProvenance{Auth: ProvenanceAuthentication{User: "guy", Password: "1234"},
+			Conn: ProvenanceConnection{Ipv4: 18 << 24}},
 		testExpectedProvenanceScores{
-			scores: proveTypeToScore{ProvenanceTypeConnection: 10005, ProvenanceTypeAuthentication: 15}}
+			scores: proveTypeToScore{ProvenanceTypeConnection: 18, ProvenanceTypeAuthentication: (64 - 4) * 4}}
 }
 
 func dummyProvenance3() (DBProvenance, testExpectedProvenanceScores) {
-	return DBProvenance{Auth: ProvenanceAuthentication{User: "aaaaab", Password: "aaaaaaaaaa"},
-			Conn: ProvenanceConnection{Ipv4: 500}},
+	return DBProvenance{Auth: ProvenanceAuthentication{User: "aaaaab", Password: "aaaaa"},
+			Conn: ProvenanceConnection{Ipv4: 10 << 14}},
 		testExpectedProvenanceScores{
-			scores: proveTypeToScore{ProvenanceTypeConnection: 500, ProvenanceTypeAuthentication: 10}}
+			scores: proveTypeToScore{ProvenanceTypeConnection: 10, ProvenanceTypeAuthentication: (64 - 5) * 4}}
 }
 
 func TestFullFlow(t *testing.T) {
