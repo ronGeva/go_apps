@@ -105,8 +105,7 @@ records := cursor.FetchAll()
 
 In this example, we get the 10 most reliable (costumerId, receiptAmount) pairs we have in the database.
 
-The implementation of this logic is mostly in [provenanceGetTopRecords](provenance_record_iterator.go#L417).
-
+The implementation of this logic is mostly in [provenanceGetTopRecords](provenance_record_iterator.go#L467).
 
 ## What's next ##
  Features I've yet to implement:
