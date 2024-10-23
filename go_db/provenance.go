@@ -14,37 +14,58 @@ type ProvenanceScore uint32
 type ProvenanceOperator uint8
 type ProvenanceAggregationFunc func([]ProvenanceScore) ProvenanceScore
 
+// supported provenance types
 const (
 	ProvenanceTypeConnection ProvenanceType = iota
 	ProvenanceTypeAuthentication
 )
 
+// the expected order of provenance types in each record
 var PROVENANCE_ORDERED_TYPES []ProvenanceType = []ProvenanceType{
 	ProvenanceTypeConnection,
 	ProvenanceTypeAuthentication,
 }
 
+// supported provenance operators
+// opreator nil is used in a simple provenance which has no operator, only a single provenance field
 const (
 	ProvenanceOperatorNil ProvenanceOperator = iota
 	ProvenanceOperatorPlus
 	ProvenanceOperatorMultiply
 )
 
+// this structure describes how provenance is aggregated during different operations - multiplication (in JOIN),
+// addition (in SELECT with set semantics) and multi-prov-aggregation (when we want to get the final provenance score
+// of a record with multiple provenance fields).
 type ProvenanceSettings struct {
 	MultiplicationAggregation ProvenanceAggregationFunc
 	AdditionAggregation       ProvenanceAggregationFunc
 	MultiProvAggregation      ProvenanceAggregationFunc
 }
 
+// the default provenance aggregation functions used when the user hasn't explicitly requested
+// some other setting.
 var DEFAULT_PROVENANCE_SETTINGS ProvenanceSettings = ProvenanceSettings{
 	MultiplicationAggregation: ProvenanceAggregationMax,
 	AdditionAggregation:       ProvenanceAggregationMin,
 	MultiProvAggregation:      ProvenanceAggregationAverage}
 
+// the stringified version of the provenance operators (used to stringify a provenance field)
 var PROVENANCE_OPERATOR_STRING = map[ProvenanceOperator]string{
 	ProvenanceOperatorMultiply: "*",
 	ProvenanceOperatorPlus:     "+",
 }
+
+type ProvenanceAuthentication struct {
+	User     string
+	Password string
+}
+
+type ProvenanceConnection struct {
+	Ipv4 uint32
+}
+
+// ****************** provenance aggregation functions ******************
 
 func ProvenanceAggregationMin(scores []ProvenanceScore) ProvenanceScore {
 	minProv := 0xffffffff
@@ -86,18 +107,7 @@ func ProvenanceAggregationMultiplication(scores []ProvenanceScore) ProvenanceSco
 	return result
 }
 
-func provenanceOperatorAggregation(operator ProvenanceOperator, settings *ProvenanceSettings,
-	operandScores []ProvenanceScore) ProvenanceScore {
-	if operator == ProvenanceOperatorMultiply {
-		return settings.MultiplicationAggregation(operandScores)
-	}
-	if operator == ProvenanceOperatorPlus {
-		return settings.AdditionAggregation(operandScores)
-	}
-
-	assert(false, "invalid provenance operator was passed")
-	return 0
-}
+// ****************** provenance types serialization ******************
 
 func provenanceConnectionStringify(field Field) string {
 	blobField, ok := field.(BlobField)
@@ -109,7 +119,7 @@ func provenanceConnectionStringify(field Field) string {
 	return ipv4.String()
 }
 
-func deserializeProvenanceAuthenticationField(data []byte) ProvenanceAuthentication {
+func deserializeProvenanceAuthentication(data []byte) ProvenanceAuthentication {
 	i := 0
 	userSize := binary.LittleEndian.Uint16(data[i : i+2])
 	i += 2
@@ -124,14 +134,14 @@ func deserializeProvenanceAuthenticationField(data []byte) ProvenanceAuthenticat
 	return ProvenanceAuthentication{User: username, Password: pass}
 }
 
-func serializeProvenanceConnectionField(connection ProvenanceConnection) []byte {
+func serializeProvenanceConnection(connection ProvenanceConnection) []byte {
 	data := make([]byte, 4)
 	binary.LittleEndian.PutUint32(data[:4], connection.Ipv4)
 
 	return data
 }
 
-func serializeProvenanceAuthenticationField(auth ProvenanceAuthentication) []byte {
+func serializeProvenanceAuthentication(auth ProvenanceAuthentication) []byte {
 	userLen := len([]byte(auth.User))
 	passLen := len([]byte(auth.Password))
 	totalSize := 2 + userLen + 2 + passLen
@@ -160,7 +170,7 @@ func provenanceAuthenticationStringify(field Field) string {
 		return "<faulty authentication provenance>"
 	}
 
-	authentication := deserializeProvenanceAuthenticationField(blobField.Data)
+	authentication := deserializeProvenanceAuthentication(blobField.Data)
 	return fmt.Sprintf("username: %s", authentication.User)
 }
 
@@ -177,6 +187,16 @@ func deserializeConnectionProvenance(data []byte) ProvenanceConnection {
 	return ProvenanceConnection{Ipv4: ipv4}
 }
 
+// ****************** provenance field ******************
+
+type ProvenanceField struct {
+	Type     ProvenanceType
+	Value    Field
+	operator ProvenanceOperator
+	operands []*ProvenanceField
+	settings *ProvenanceSettings
+}
+
 func provenanceConnectionScore(field Field) ProvenanceScore {
 	blobField, ok := field.(BlobField)
 	assert(ok, "failed to retrieve int field from data reliability provenance")
@@ -188,12 +208,30 @@ func provenanceConnectionScore(field Field) ProvenanceScore {
 func provenanceAuthenticationScore(field Field) ProvenanceScore {
 	blobField, ok := field.(BlobField)
 	assert(ok, "failed to retrieve blob field from authentication provenance")
-	authentication := deserializeProvenanceAuthenticationField(blobField.Data)
+	authentication := deserializeProvenanceAuthentication(blobField.Data)
 
 	return authenticationScore(authentication)
 }
 
+// aggregate multiple provenance score into a single one using the requested aggregation function
+// (which is mentioned in the provenance settings).
+func provenanceOperatorAggregation(operator ProvenanceOperator, settings *ProvenanceSettings,
+	operandScores []ProvenanceScore) ProvenanceScore {
+	if operator == ProvenanceOperatorMultiply {
+		return settings.MultiplicationAggregation(operandScores)
+	}
+	if operator == ProvenanceOperatorPlus {
+		return settings.AdditionAggregation(operandScores)
+	}
+
+	assert(false, "invalid provenance operator was passed")
+	return 0
+}
+
+// the score of a simple provenance field which has no operators nor operands
 func (field *ProvenanceField) simpleScore() ProvenanceScore {
+	assert(field.Value != nil, "cannot get simple score of a complex provenance field")
+
 	if field.Type == ProvenanceTypeAuthentication {
 		return provenanceAuthenticationScore(field.Value)
 	}
@@ -205,6 +243,8 @@ func (field *ProvenanceField) simpleScore() ProvenanceScore {
 	return 0
 }
 
+// retrieves the aggregated "reliability score" of the record according to this
+// provenance field.
 func (field *ProvenanceField) Score() ProvenanceScore {
 	if field.operator == ProvenanceOperatorNil {
 		return field.simpleScore()
@@ -216,54 +256,6 @@ func (field *ProvenanceField) Score() ProvenanceScore {
 	}
 
 	return provenanceOperatorAggregation(field.operator, field.settings, operandsScores)
-}
-
-func deserializeProvenanceAuthentication(data []byte) ProvenanceField {
-	return ProvenanceField{Type: ProvenanceTypeAuthentication, Value: BlobField{Data: data}}
-}
-
-func deserializeProvenanceConnection(data []byte) ProvenanceField {
-	assert(len(data) == 4, "invalid connection provenance size")
-
-	return ProvenanceField{Type: ProvenanceTypeConnection, Value: BlobField{Data: data}}
-}
-
-var PROVENANCE_TYPE_TO_DESERIALIZATION_FUNC = map[ProvenanceType]func([]byte) ProvenanceField{
-	ProvenanceTypeConnection:     deserializeProvenanceConnection,
-	ProvenanceTypeAuthentication: deserializeProvenanceAuthentication,
-}
-
-var AMOUNT_OF_PROVENANCE_COLUMNS int = len(PROVENANCE_TYPE_TO_DESERIALIZATION_FUNC)
-
-type ProvenanceAuthentication struct {
-	User     string
-	Password string
-}
-
-type ProvenanceConnection struct {
-	Ipv4 uint32
-}
-
-type ProvenanceField struct {
-	Type     ProvenanceType
-	Value    Field
-	operator ProvenanceOperator
-	operands []*ProvenanceField
-	settings *ProvenanceSettings
-}
-
-func (field ProvenanceField) getType() FieldType {
-	return FieldTypeProvenance
-}
-
-func deserializeProvenanceField(data []byte) Field {
-	provType := binary.LittleEndian.Uint16(data[:2])
-	operator := ProvenanceOperator(data[2])
-
-	// pass the data past the type
-	field := PROVENANCE_TYPE_TO_DESERIALIZATION_FUNC[ProvenanceType(provType)](data[3:])
-	field.operator = operator
-	return field
 }
 
 func (field ProvenanceField) serialize() []byte {
@@ -293,25 +285,77 @@ func (field ProvenanceField) Stringify() string {
 	return strings.Join(operandsStrings, PROVENANCE_OPERATOR_STRING[field.operator])
 }
 
+// returns the score of the field as the BTree key.
+// we use the score as the key since we index provenance columns in order to support the "get best records"
+// API.
+// this means that we would like the records to be indexed according to their reliability, which is represented
+// by their provenance field scores.
 func (field ProvenanceField) ToKey() *b_tree.BTreeKeyType {
 	score := field.Score()
 	key := b_tree.BTreeKeyType(int(score))
 	return &key
 }
 
+func (field ProvenanceField) getType() FieldType {
+	return FieldTypeProvenance
+}
+
+func deserializeProvenanceAuthenticationField(data []byte) ProvenanceField {
+	return ProvenanceField{Type: ProvenanceTypeAuthentication, Value: BlobField{Data: data}}
+}
+
+func deserializeProvenanceConnectionField(data []byte) ProvenanceField {
+	assert(len(data) == 4, "invalid connection provenance size")
+
+	return ProvenanceField{Type: ProvenanceTypeConnection, Value: BlobField{Data: data}}
+}
+
+var PROVENANCE_TYPE_TO_DESERIALIZATION_FUNC = map[ProvenanceType]func([]byte) ProvenanceField{
+	ProvenanceTypeConnection:     deserializeProvenanceConnectionField,
+	ProvenanceTypeAuthentication: deserializeProvenanceAuthenticationField,
+}
+
+func deserializeProvenanceField(data []byte) Field {
+	provType := binary.LittleEndian.Uint16(data[:2])
+	operator := ProvenanceOperator(data[2])
+
+	// pass the data past the type
+	field := PROVENANCE_TYPE_TO_DESERIALIZATION_FUNC[ProvenanceType(provType)](data[3:])
+	field.operator = operator
+	return field
+}
+
+// deserializes a list of provenance fields from the table.
+func provenanceDeserializeRecordProvenanceFields(db *openDB, provData []byte, scheme *tableScheme) []ProvenanceField {
+	provFields := deserializeRecordColumns(db, provData, scheme.provColumns)
+	downcastProvFields := make([]ProvenanceField, 0)
+
+	// cast each field into a provenance field
+	for _, provField := range provFields {
+		downcastField, ok := provField.(ProvenanceField)
+		assert(ok, "failed to downcast provenance field")
+		downcastField.settings = &db.provSettings
+		downcastProvFields = append(downcastProvFields, downcastField)
+	}
+
+	return downcastProvFields
+}
+
+// ****************** openDB provenance ******************
+
 func addProvenanceToRecord(db *openDB, record *Record) {
 	record.Provenance = db.provFields
 }
 
 func provenanceGenerateConnectionField(db *openDB) ProvenanceField {
-	connectionData := serializeProvenanceConnectionField(db.connection)
+	connectionData := serializeProvenanceConnection(db.connection)
 	connectionField := BlobField{Data: connectionData}
 	return ProvenanceField{Type: ProvenanceTypeConnection, Value: connectionField,
 		operator: ProvenanceOperatorNil}
 }
 
 func provenanceGenerateAuthenticationField(db *openDB) ProvenanceField {
-	authData := serializeProvenanceAuthenticationField(db.authentication)
+	authData := serializeProvenanceAuthentication(db.authentication)
 	authField := BlobField{Data: authData}
 	return ProvenanceField{Type: ProvenanceTypeAuthentication, Value: authField,
 		operator: ProvenanceOperatorNil}
@@ -342,6 +386,7 @@ func (db *openDB) provenanceSchemeColumns() []columnHeader {
 	return cols
 }
 
+// the names of the supported provenance fields, used for visibility to the user
 func (db *openDB) provenanceNames() []string {
 	provCols := db.provenanceSchemeColumns()
 	names := make([]string, 0)
@@ -353,6 +398,8 @@ func (db *openDB) provenanceNames() []string {
 	return names
 }
 
+// given an open connection to the database, return the appropriate provenance fields
+// to use for records added via this connection
 func generateOpenDBProvenance(db *openDB) []ProvenanceField {
 	provFields := make([]ProvenanceField, 0)
 	for _, column := range db.provenanceSchemeColumns() {
@@ -363,12 +410,21 @@ func generateOpenDBProvenance(db *openDB) []ProvenanceField {
 	return provFields
 }
 
+// the provenance metadata associated with an open connection to the database.
+// it contains both the provenance of the entity that initiated the connection as well as
+// the desired aggregtion functions to use in records retrieval.
 type DBProvenance struct {
 	Auth     ProvenanceAuthentication
 	Conn     ProvenanceConnection
 	Settings *ProvenanceSettings
 }
 
+// ****************** provenance operators ******************
+
+// merges a list of provenance fields into a (possibly) smaller list, containing a single field of each type
+// present in the original list.
+// each new provenance field in the new list will contain the combined provenance of all the fields with its type
+// that appeared in the input, joint together via some operator.
 func provenanceApplyOperatorToProvenanceList(provenances []ProvenanceField, operator ProvenanceOperator) []ProvenanceField {
 	var provSettings *ProvenanceSettings = nil
 	if len(provenances) > 0 {
@@ -411,6 +467,9 @@ func provenanceApplyJoin(record *jointRecord) {
 		provenanceApplyOperatorToProvenanceList(jointProvenance, ProvenanceOperatorMultiply)
 }
 
+// given a list of records with identical fields, return a single record with those fields and the
+// combined provenance of all the identical records.
+// the operator used between each same-type provenance fields will be addition "+" in this case.
 func provenanceApplySelect(identicalRecords []Record) Record {
 	assert(len(identicalRecords) > 0, "empty identical records list is not supported")
 
@@ -427,17 +486,4 @@ func provenanceApplySelect(identicalRecords []Record) Record {
 	projectedRecord.Provenance =
 		provenanceApplyOperatorToProvenanceList(projectedRecord.Provenance, ProvenanceOperatorPlus)
 	return projectedRecord
-}
-
-func provenanceDeserializeRecordProvenanceFields(db *openDB, provData []byte, scheme *tableScheme) []ProvenanceField {
-	provFields := deserializeRecordColumns(db, provData, scheme.provColumns)
-	downcastProvFields := make([]ProvenanceField, 0)
-	for _, provField := range provFields {
-		downcastField, ok := provField.(ProvenanceField)
-		assert(ok, "failed to downcast provenance field")
-		downcastField.settings = &db.provSettings
-		downcastProvFields = append(downcastProvFields, downcastField)
-	}
-
-	return downcastProvFields
 }

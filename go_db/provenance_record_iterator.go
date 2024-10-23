@@ -1,5 +1,23 @@
 package go_db
 
+// This module contains logic that allows users to retrieve the top K records in a given joint table via their provenance.
+// Each provenance field has a pre-determined ranking which signifies how reliable the data is.
+// A joint record has a provenance composed out of all the atomic records from which it was created, with an operator "*"
+// between them.
+// For example, given 3 records A, B, C, each with 2 provenance fields [[A_1, A_2], [B_1, B_2], [C_1, C_2]], the joint
+// record will have two provenance fields: [A_1 * B_1 * C_1, A_2 * B_2 * C_2].
+//
+// In order to calculate the overall provenance of a record we must somehow aggregate all those values into a single
+// provenance score.
+// This is done via an monotonous non-decreasing aggregation function.
+// The provenance operator "*" and "+" each have such function, and we have such a function for aggregating
+// the combined score of multiple provenance fields of different types.
+// The algorithm presented here assumes we receive the aggregation function of multi-provenance fields record
+// as an input.
+//
+// The usage of this module is to efficiently retrieve the top most reliable records out of the entire joint
+// table.
+
 import (
 	"fmt"
 	"sort"
@@ -18,24 +36,29 @@ type provIndexRecord struct {
 	indexOffsets []uint32
 }
 
-// This module contains logic that allows users to retrieve the top K records in a given joint table via their provenance.
-// Each provenance field has a pre-determined ranking which signifies how reliable the data is.
-// We want to allow users to efficiently retrieve the most reliable records.
-
+// An iterator which retrieves joint records out of a joint table in order of their provenance, given a specific
+// provenance type that we're interested in.
 type provenanceTableIterator struct {
-	// use this iterators to retrieve new joint records
+	// iterators to the underlying provenance column indexes of each of the tables
 	iterators []indexTableIterator
 
 	// the next candidates to be the top record
 	// use a BTree to allow for quick insert/deletion and to easily retrieve the current smallest value
 	candidates b_tree.BTree
 
+	// since we can't save records directly in the candidates BTree, we save pointers for them.
+	// in order to use unique pointers, we keep an increasing counter for each new candidate we
+	// add.
+	pointerCounter uint32
+
 	// a mapping between the pointer in a candidates pair and the list of tuples which have a score
-	// matching the pair's key
+	// matching the pair's key.
 	candidatesMapping map[b_tree.BTreePointer][]provIndexRecord
 
 	// records we've retrieved for each of the tables
 	// at index [i][j] we'll have the j-th record of the i-th table
+	// This member is needed since we want to retrieve the same record for each joint record in which it
+	// is a part of.
 	retrievedRecords [][]tableCurrentRecord
 
 	// a set containing all visited tuples
@@ -43,11 +66,11 @@ type provenanceTableIterator struct {
 	// from all other possible tuples).
 	visited map[string]interface{}
 
-	pointerCounter uint32
-
+	// the provenance type we're interested in
 	provType ProvenanceType
 }
 
+// pop the next best candidate from the candidates BTree.
 func (iterator *provenanceTableIterator) popBestCandidate() *provIndexRecord {
 	candidatesIterator := iterator.candidates.Iterator()
 	if candidatesIterator == nil {
@@ -55,6 +78,7 @@ func (iterator *provenanceTableIterator) popBestCandidate() *provIndexRecord {
 		return nil
 	}
 
+	// get next candidate with smallest score
 	pair := candidatesIterator.Next()
 	if pair == nil {
 		return nil
@@ -63,6 +87,7 @@ func (iterator *provenanceTableIterator) popBestCandidate() *provIndexRecord {
 	// arbitrarily choose the first element from all candidates with equal score
 	candidates, ok := iterator.candidatesMapping[pair.Pointer]
 	assert(ok, "failed get mapping of candidate pointer")
+	assert(len(candidates) > 0, "got an empty same-score-candidates list")
 	bestCandidate := candidates[0]
 
 	// remove the candidate chosen from the list of tuples with identical scores.
@@ -77,6 +102,8 @@ func (iterator *provenanceTableIterator) popBestCandidate() *provIndexRecord {
 	return &bestCandidate
 }
 
+// given a list of the indexes of each record in a joint record, generate the record itself.
+// we assume all records at those offsets were already cached in the "retrievedRecords" member.
 func (iterator *provenanceTableIterator) generateRecord(offsets []uint32) *provIndexRecord {
 	record := jointRecord{}
 	// go in reverse order in order to create the record's field in the correct order
@@ -97,17 +124,23 @@ func (iterator *provenanceTableIterator) generateRecord(offsets []uint32) *provI
 	return &provIndexRecord{indexOffsets: offsets, record: record}
 }
 
-func (iterator *provenanceTableIterator) aggregateProvenance(record *Record) ProvenanceScore {
+// get the provenance score of the record (we only care for the provenance type this iterator
+// was initialized for).
+func (iterator *provenanceTableIterator) recordProvenance(record *Record) ProvenanceScore {
 	for _, provField := range record.Provenance {
 		if provField.Type == iterator.provType {
 			return provField.Score()
 		}
 	}
 
-	assert(false, "we should never reach this flow")
-	return 0 // for it to compile
+	assert(false, "failed to find expected provenance field in provenanceTableIterator")
+	// return value is required for the code to compile, we will never reach this flow
+	return 0
 }
 
+// add a new candidate for the "top record" into the candidates BTree.
+// we assume all the records required to generate this joint record were already cached beforehand
+// in the "retrievedRecords" member.
 func (iterator *provenanceTableIterator) addNewCandidate(candidate []uint32) {
 	candidateStringKey := fmt.Sprint(candidate)
 
@@ -117,7 +150,7 @@ func (iterator *provenanceTableIterator) addNewCandidate(candidate []uint32) {
 	}
 
 	candidateRecord := iterator.generateRecord(candidate)
-	candidateScore := iterator.aggregateProvenance(&candidateRecord.record.record)
+	candidateScore := iterator.recordProvenance(&candidateRecord.record.record)
 	existingPointer := iterator.candidates.Get(b_tree.BTreeKeyType(candidateScore))
 	var pointer b_tree.BTreePointer
 	if existingPointer == nil {
@@ -138,6 +171,7 @@ func (iterator *provenanceTableIterator) addNewCandidate(candidate []uint32) {
 	iterator.visited[candidateStringKey] = nil
 }
 
+// cache the atomic record at tables[tableOffset][recordOffset].
 // returns whether we've succeeded in caching the required record
 func (iterator *provenanceTableIterator) cacheNextTableRecord(tableOffset uint32, recordOffset uint32) bool {
 	assert(int(recordOffset) <= len(iterator.retrievedRecords[tableOffset]), "invalid record offset")
@@ -160,6 +194,11 @@ func (iterator *provenanceTableIterator) cacheNextTableRecord(tableOffset uint32
 	return true
 }
 
+// add all the new candidates given the current best record's offset.
+// we do so by generating len(tables) new candidates by increasing by one each of the
+// "currentBest" record's indexes by 1.
+// we cache the required records for each new candidate then add it to the candidates
+// tree (if it wasn't added already in the past).
 func (iterator *provenanceTableIterator) addNewCandidates(currentBest []uint32) {
 	for tableOffset := 0; tableOffset < len(currentBest); tableOffset++ {
 		recordOffset := currentBest[tableOffset]
@@ -177,6 +216,7 @@ func (iterator *provenanceTableIterator) addNewCandidates(currentBest []uint32) 
 	}
 }
 
+// get the next best record (according to the chosen provenance type)
 func (iterator *provenanceTableIterator) next() *jointRecord {
 	// pop the best candidate we've pre-calculated
 	record := iterator.popBestCandidate()
@@ -191,6 +231,8 @@ func (iterator *provenanceTableIterator) next() *jointRecord {
 	return &record.record
 }
 
+// adds the first "best candidate" into the candidates tree (that would be the candidates whose
+// offsets are (0, 0, ... 0))
 func (iterator *provenanceTableIterator) initialize() error {
 
 	firstCandidate := make([]uint32, len(iterator.iterators))
@@ -207,6 +249,8 @@ func (iterator *provenanceTableIterator) initialize() error {
 	return nil
 }
 
+// initializes and returns a provenanceTableIterator through which we can iterate a joint table's records best to worst,
+// according to a specific provenance type.
 func provenanceInitializeTableIterator(db *openDB, tableIds []string, provType ProvenanceType) (*provenanceTableIterator, error) {
 	provOffset := -1
 	for i := 0; i < len(db.provFields); i++ {
@@ -255,23 +299,36 @@ type provenanceAggregatedTableIterator struct {
 	// Maps a joint record unique ID with the amount of times it has been seen on
 	// different provenance lists.
 	// Once a record has been seen on all lists, we can assume it has a bigger aggregated
-	// score than all non-returned records and we can return it.
+	// score than all non-seen records and we can return it.
 	recordSeenCounter map[string]uint32
 
+	// a map containing the records we've already retrieved.
+	// the key to this map is the stringified tuple of the joint records' offsets (as in
+	// the offsets in the table of each record from which this joint record is created).
+	//
+	// the record offsets used here are different than the ones used in provenanceTableIterator,
+	// as their we use the offsets of the records within the provenance indexes of each record.
 	retrievedRecords map[string]jointRecord
 
 	// Iterators used to retrieve the next best joint record according to each provenance
 	// field.
 	iterators []provenanceTableIterator
 
-	// The function used to aggregate
+	// The function used to aggregate the provenance score of a record according to each specific
+	// provenance field into a single score.
 	aggregation ProvenanceAggregationFunc
 
+	// a list containing the records we've already seen on all different provenance-ordered lists
+	// (each generated by iterating a different provenanceTableIterator).
 	seenOnAllLists []jointRecord
 
+	// the conditions we want each record to uphold in order for us to retrieve it
 	conditions *conditionNode
 }
 
+// performs a single "loop" over all different provenance-ordered lists.
+// retrieve a record from each provenance iterator then adds it to the "retrievedRecords" and
+// the "seenOnAllLists" members accordingly.
 // returns true if finished
 func (iterator *provenanceAggregatedTableIterator) advance() bool {
 	for i := 0; i < len(iterator.iterators); i++ {
@@ -355,6 +412,8 @@ func (records *provRankedRecords) Swap(i, j int) {
 	records.records[j] = temp
 }
 
+// retrieves the top <amount> best joint records according to their aggregated provenance score.
+// the records retrieved will be ordered according to their aggregated provenance score.
 func provenanceGetTopRecords(db *openDB, tables []string, aggregation ProvenanceAggregationFunc,
 	amount uint32, conditions *conditionNode) (
 	[]Record, error) {
@@ -363,6 +422,11 @@ func provenanceGetTopRecords(db *openDB, tables []string, aggregation Provenance
 		return nil, err
 	}
 
+	// continue iterating the aggregated provenance iterator until we've seen the amount of records
+	// we're looking for on all lists.
+	// once that is the case - we can be sure all records we've yet to see have a worse aggregated
+	// score than the ones we've seen on all lists.
+	// we can then sort the records we've seen and return the best of them.
 	for len(iterator.seenOnAllLists) < int(amount) {
 		if iterator.advance() {
 			// no more entries
