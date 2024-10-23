@@ -172,6 +172,9 @@ func getIOInterface(dbPath string, mode int) IoInterface {
 	return f
 }
 
+// opens a connection to the database.
+// @param db - the database the connection will be for.
+// @param prov - the provenance for this connection.
 func getOpenDB(db database, prov *DBProvenance) (*openDB, error) {
 	f := getIOInterface(db.id.identifyingString, os.O_RDWR)
 
