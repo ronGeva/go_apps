@@ -91,7 +91,7 @@ The database supports retrieving the top most reliable records (according to the
 This is done via the normal SELECT query, with the addition of the new keyword "best", which is added after the "order by" clause.
 An example of usage is:
  ```go
-connProv := go_db.ProvenanceConnection{Ipv4: ipv4LittleEndian}
+connProv := go_db.ProvenanceConnection{Ipv4: ipv4BigEndian}
 authProv := go_db.ProvenanceAuthentication{User: username, Password: password}
 prov := go_db.DBProvenance{Conn: connProv, Auth: authProv}
 

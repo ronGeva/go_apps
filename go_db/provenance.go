@@ -62,7 +62,7 @@ type ProvenanceAuthentication struct {
 }
 
 type ProvenanceConnection struct {
-	// the IPV4 value of the endpoint in little endian
+	// the IPV4 value of the endpoint in big endian
 	Ipv4 uint32
 }
 
