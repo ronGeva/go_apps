@@ -13,10 +13,8 @@ type BTreeKeyType int
 
 var BTreeErrorNotFound error = errors.New("item not found")
 
-// Assume the underlying value is bTreeKeyType
 type BTree struct {
-	rootPointer BTreePointer
-	// The following members represent pointers to structures in "memory"
+	rootPointer   BTreePointer
 	persistency   persistencyApi
 	minimumDegree int
 }
@@ -32,6 +30,8 @@ func serializeBTree(tree *BTree) []byte {
 	return data
 }
 
+// Initializes a new empty B+ Tree.
+// @param store: an object allowing the tree to save/load data into persistent storage.
 func InitializeBTree(store PersistencyInterface) (*BTree, error) {
 	persistency := persistencyApi{store: store}
 	rootData, err := store.Load(store.RootPointer())
@@ -64,6 +64,9 @@ func (tree *BTree) updateRootPointer(pointer BTreePointer) {
 	tree.persistency.PersistTree(tree)
 }
 
+// Inserts a key-value pair into the tree.
+// This new item will be indexes according to its key.
+// Entering a pair with a key that is alreadyd in the tree will fail and return BTreeErrorKeyAlreadyExists.
 func (tree *BTree) Insert(item BTreeKeyPointerPair) error {
 	if tree.rootPointer == InvalidBTreePointer {
 		// tree is empty, allocate root.
@@ -95,6 +98,8 @@ func (tree *BTree) Insert(item BTreeKeyPointerPair) error {
 	return root.insertNonFull(item)
 }
 
+// Deletes a pair from the tree which has this key.
+// If the key is not found, return BTreeErrorNotFound.
 func (tree *BTree) Delete(key BTreeKeyType) error {
 	// Algorithm:
 	// Traverse the tree to find the leaf node in which the item resides.
@@ -123,6 +128,8 @@ func (tree *BTree) Delete(key BTreeKeyType) error {
 	return nil
 }
 
+// Returns an iterator which allows iterating over all of the tree pairs, in ascending
+// key order.
 func (tree *BTree) Iterator() *BTreeIterator {
 	if tree.rootPointer == InvalidBTreePointer {
 		return nil
@@ -138,6 +145,8 @@ func (tree *BTree) Iterator() *BTreeIterator {
 	return &BTreeIterator{currentNode: currentNode, offsetInNode: 0, tree: tree}
 }
 
+// Returns the "value" of a pair with the key specified.
+// Returns nil if the key was not found in the tree.
 func (tree *BTree) Get(key BTreeKeyType) *BTreePointer {
 	if tree.rootPointer == InvalidBTreePointer {
 		return nil

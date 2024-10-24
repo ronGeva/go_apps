@@ -7,6 +7,7 @@ import (
 
 var BTreeNotInitialized error = errors.New("an attempt was made to load an uninitialized tree")
 
+// An object exposing persistency APIs which allow the tree to save/load data into a persistent storage
 type PersistencyInterface interface {
 	// loads a buffer from a pointer that was previously received from Persist
 	Load(BTreePointer) ([]byte, error)
@@ -25,7 +26,7 @@ type PersistencyInterface interface {
 	// This pointer will be used during the execution of the b_tree package to persist changes in its root
 	// object, and will be used during initialization to load the root back into memory.
 	//
-	// The b_tree library expects the first call to persistency.Load(persistency.RootPointer()) return return
+	// The b_tree library expects the first call to persistency.Load(persistency.RootPointer()) to return
 	// the error BTreeNotInitialized.
 	// Only by receiving this specific error will the b_tree module know this is a regular flow in which the tree
 	// was yet to be persisted.

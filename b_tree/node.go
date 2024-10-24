@@ -6,7 +6,8 @@ const InvalidBTreePointer BTreePointer = -1
 
 var BTreeErrorKeyAlreadyExists error = errors.New("item's key is already in the tree")
 
-// Each pointer-value pair indicate a node with a values starting with that value
+// A pair of key/pointer values.
+// The tree will index each pair according to the value of the key.
 type BTreeKeyPointerPair struct {
 	Pointer BTreePointer
 	Key     BTreeKeyType

@@ -22,6 +22,8 @@ func (iterator *BTreeIterator) advanceIfNeeded() bool {
 	return true
 }
 
+// Get the next pair in the tree.
+// Returns nil once iteration has completed.
 func (iterator *BTreeIterator) Next() *BTreeKeyPointerPair {
 	if !iterator.advanceIfNeeded() {
 		return nil // no more entries
