@@ -25,12 +25,16 @@ var QUERY_TYPE_TO_FUNC = map[queryType]func(*openDB, *Cursor, string) error{
 	QueryTypeUpdate: ExecuteUpdateQuery,
 }
 
+// Initializes a connection to the DB.
+// @param path - the path of the DB.
+// @param provenance - metadata about the origin of the data that will be inserted from this connection.
 func Connect(path string, provenance *DBProvenance) (Connection, error) {
 	db := database{id: databaseUniqueID{ioType: LocalFile, identifyingString: path}}
 
 	return Connection{db: db, prov: provenance}, nil
 }
 
+// Opens a Cursor object which allows performing queries on the DB.
 func (conn *Connection) OpenCursor() Cursor {
 	return Cursor{conn: conn}
 }
@@ -127,6 +131,9 @@ func ExecuteUpdateQuery(openDatabase *openDB, cursor *Cursor, sql string) error 
 	return updateRecordsViaCondition(openDatabase, query.tableID, query.condition, query.update)
 }
 
+// Executes an SQL query.
+// If the query results in an output, data about it can be fetched using Cursor.FetchAll()
+// and Cursor.ColumnNames().
 func (cursor *Cursor) Execute(sql string) error {
 	sql = normalizeQuery(sql)
 	queryType, err := parseQueryType(sql)
@@ -149,10 +156,12 @@ func (cursor *Cursor) Execute(sql string) error {
 	return nil
 }
 
+// Fetch all the records received during the last SQL execution of this Cursor object.
 func (cursor *Cursor) FetchAll() []Record {
 	return cursor.records
 }
 
+// Get the column names of the records received during the last SQL execution of this Cursor object.
 func (cursor *Cursor) ColumnNames() []string {
 	return append(cursor.columnNames, cursor.provenanceNames...)
 }
