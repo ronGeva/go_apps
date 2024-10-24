@@ -107,6 +107,11 @@ In this example, we get the 10 most reliable (costumerId, receiptAmount) pairs w
 
 The implementation of this logic is mostly in [provenanceGetTopRecords](provenance_record_iterator.go#L467).
 
+Note: set semantics do not come into play when "best" is used - that is because of how the provenance iterator is implemented.
+In order to properly apply set semantics we must first get all records which fit the query, then merge together all identical records.
+However, when we use the provenance iterator we create records "on the fly" (starting from the most credible data and moving to less and less credible data as iteration continues).
+This means we cannot guarantee that we've found all the records that have a specific set of values, and therefore can't properly apply set semantics.
+
 ## What's next ##
  Features I've yet to implement:
  * Concurrent access to the DB
